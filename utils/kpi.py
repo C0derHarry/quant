@@ -5,28 +5,55 @@ import numpy as np
 
 ## Compounded Annual Growth Rate (CAGR)
 
-def CAGR(df, timeframe):
+def CAGR(df, timeframe, column='Close', is_price=True):
+    """
+    Calculate CAGR.
+
+    Args:
+        df (pd.DataFrame): DataFrame with time series data
+        timeframe (int): number of periods per year (e.g., 12 for monthly)
+        column (str): column name to use
+        is_price (bool): True if column is price series, False if already returns
+
+    Returns:
+        float: CAGR
+    """
     df = df.copy()
-    df['return'] = df['Close'].pct_change()
+
+    # if column not in df.columns:
+    #     raise ValueError(f"Column '{column}' not found in DataFrame.")
+
+    if is_price:
+        df['return'] = df[column]
+    else:
+        df['return'] = df[column].pct_change()
+
     df['cum_return'] = (1 + df['return']).cumprod()
-    n= len(df) / timeframe  
-    cagr = (df['cum_return'].iloc[-1]) ** (1/n) - 1
+    n = len(df) / timeframe
+    cagr = df['cum_return'].iloc[-1] ** (1/n) - 1
     return cagr
 
 
 ## Volaitility 
 
-def volatility(df, timeframe):
+def volatility(df, timeframe, column):
     df = df.copy()
-    df['return'] = df['Close'].pct_change()
-    vol = np.std(df['return']) * np.sqrt(timeframe)  
+    if column not in df.columns:
+        pass
+    else:
+        df['return'] = df[column].pct_change()
+    vol = np.std(df[column]) * np.sqrt(timeframe)  
     return vol
 
 ## Sharpe Ratio
 
-def Sharpe(df):
+def Sharpe(df, column='Close', is_price=True):
+    if is_price:
+        df['return'] = df[column].pct_change()
+    else:
+        df['return'] = df[column]
     df = df.copy()
-    sharpe = (CAGR(df)-0.03) / volatility(df)
+    sharpe = (CAGR(df, column)-0.03) / volatility(df, column)
     return sharpe
 
 ## Sortino Ratio
@@ -43,10 +70,13 @@ def Sortino(df, rfr, timeframe):
 
 ## Maximum Drawdown
 
-def max_dd(df):
+def max_dd(df, column='Close'):
     df = df.copy()
-    df['return'] = df['Close'].pct_change()
-    df['cum_return'] = (1 + df['return']).cumprod()
+    if column not in df.columns:
+        pass
+    else:
+        df['return'] = df['Close'].pct_change()
+    df['cum_return'] = (1 + df[column]).cumprod()
     df['peak'] = df['cum_return'].cummax()
     df['drawdown'] = df['peak'] - df['cum_return']
     return (df['drawdown']/ df['peak']).max()
