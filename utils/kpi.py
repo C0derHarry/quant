@@ -24,9 +24,9 @@ def CAGR(df, timeframe, column='Close', is_price=True):
     #     raise ValueError(f"Column '{column}' not found in DataFrame.")
 
     if is_price:
-        df['return'] = df[column]
-    else:
         df['return'] = df[column].pct_change()
+    else:
+        df['return'] = df[column]
 
     df['cum_return'] = (1 + df['return']).cumprod()
     n = len(df) / timeframe
@@ -36,26 +36,23 @@ def CAGR(df, timeframe, column='Close', is_price=True):
 
 ## Volaitility 
 
-def volatility(df, timeframe, column='Close'):
+def volatility(df, timeframe, column='Close', is_price=True):
     df = df.copy()
-    if column not in df.columns:
-        pass
-    else:
+    if is_price:
         df['return'] = df[column].pct_change()
-    vol = np.std(df[column]) * np.sqrt(timeframe)  
+    else:
+        df['return'] = df[column]
+    vol = df['return'].std() * np.sqrt(timeframe)  
     return vol
 
 
 ## Sharpe Ratio
 
 def Sharpe(df, timeframe, column='Close', is_price=True):
-    if is_price:
-        df['return'] = df[column]
-    else:
-        df['return'] = df[column].pct_change()
     df = df.copy()
-    sharpe = (CAGR(df, timeframe=timeframe, column=column, is_price=is_price)-0.03) / volatility(df, timeframe=timeframe, column=column)
-    return sharpe
+    c = CAGR(df, timeframe, column, is_price)
+    v = volatility(df, timeframe, column, is_price)
+    return (c - 0.03) / v # Assuming 3% Risk-Free Rate
 
 
 ## Sortino Ratio
@@ -73,11 +70,11 @@ def Sortino(df, rfr, timeframe):
 ## Maximum Drawdown
 
 def max_dd(df, column='Close', is_price=True):
-    df = df.copy()
+    df=df.copy()
     if is_price:
-        df['return'] = df[column]
-    else:
         df['return'] = df[column].pct_change()
+    else:
+        df['return'] = df[column]
     df['cum_return'] = (1 + df['return']).cumprod()
     df['peak'] = df['cum_return'].cummax()
     df['drawdown'] = df['peak'] - df['cum_return']
