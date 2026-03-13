@@ -17,16 +17,45 @@ def download_stock_data(stocks, days, interval):
     start_date = dt.datetime.today() - dt.timedelta(days=days)
     end_date = dt.datetime.today()
 
-    # download data for all stocks at once
+    # 1. Download everything in one go
+    # group_by='ticker' makes it much easier to iterate later
+    print(f"Downloading data for {len(stocks)} tickers...")
+    full_df = yf.download(
+        stocks, 
+        start=start_date, 
+        end=end_date, 
+        interval=interval, 
+        group_by='ticker', 
+        progress=False,
+        threads=True # Uses multi-threading for even more speed
+    )
 
     ohlc_data = {}
 
-    for stock in stocks:
-        try:
-            ohlc_data[stock] = yf.download(stock, start=start_date, end=end_date, interval=interval)
-            ohlc_data[stock].dropna(inplace=True, how="all")  # drop rows with all NaN values
-        except Exception as e:
-            print(f"Error downloading data for {stock}: {e}")
-            continue
+    # 2. If only one stock was requested, yfinance returns a standard DF
+    # If multiple, it returns a Multi-Index. Let's handle both.
+    if len(stocks) == 1:
+        ticker = stocks[0]
+        if not full_df.empty:
+            ohlc_data[ticker] = full_df.dropna(how="all")
+    else:
+        # 3. Iterate through the top level of the Multi-Index (the Tickers)
+        for ticker in stocks:
+            try:
+                # Extract the sub-dataframe for this specific ticker
+                if ticker in full_df.columns.levels[0]:
+                    ticker_df = full_df[ticker].dropna(how="all")
+                    
+                    # Check if the data is actually there (handles delisted tickers)
+                    if not ticker_df.empty:
+                        ohlc_data[ticker] = ticker_df
+                    else:
+                        print(f"Skipping {ticker}: No data found.")
+                else:
+                    print(f"Skipping {ticker}: Ticker not found in results.")
+                    
+            except Exception as e:
+                print(f"Error processing {ticker}: {e}")
 
+    print(f"Successfully downloaded {len(ohlc_data)}/{len(stocks)} stocks.")
     return ohlc_data
