@@ -36,7 +36,7 @@ def CAGR(df, timeframe, column='Close', is_price=True):
 
 ## Volaitility 
 
-def volatility(df, timeframe, column):
+def volatility(df, timeframe, column='Close'):
     df = df.copy()
     if column not in df.columns:
         pass
