@@ -45,19 +45,20 @@ def volatility(df, timeframe, column):
     vol = np.std(df[column]) * np.sqrt(timeframe)  
     return vol
 
+
 ## Sharpe Ratio
 
-def Sharpe(df, column='Close', is_price=True):
+def Sharpe(df, timeframe, column='Close', is_price=True):
     if is_price:
-        df['return'] = df[column].pct_change()
-    else:
         df['return'] = df[column]
+    else:
+        df['return'] = df[column].pct_change()
     df = df.copy()
-    sharpe = (CAGR(df, column)-0.03) / volatility(df, column)
+    sharpe = (CAGR(df, timeframe=timeframe, column=column, is_price=is_price)-0.03) / volatility(df, timeframe=timeframe, column=column)
     return sharpe
 
-## Sortino Ratio
 
+## Sortino Ratio
 
 def Sortino(df, rfr, timeframe):
     df = df.copy()
@@ -68,18 +69,20 @@ def Sortino(df, rfr, timeframe):
     sortino = (cagr - rfr) / negative_volume
     return sortino
 
+
 ## Maximum Drawdown
 
-def max_dd(df, column='Close'):
+def max_dd(df, column='Close', is_price=True):
     df = df.copy()
-    if column not in df.columns:
-        pass
+    if is_price:
+        df['return'] = df[column]
     else:
-        df['return'] = df['Close'].pct_change()
-    df['cum_return'] = (1 + df[column]).cumprod()
+        df['return'] = df[column].pct_change()
+    df['cum_return'] = (1 + df['return']).cumprod()
     df['peak'] = df['cum_return'].cummax()
     df['drawdown'] = df['peak'] - df['cum_return']
     return (df['drawdown']/ df['peak']).max()
+
 
 ## Calamar Ratio
 
