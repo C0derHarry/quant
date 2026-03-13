@@ -5,7 +5,7 @@ import numpy as np
 
 
 # Moving Average Convergence Divergence (MACD)
-def MACD(df, a=12, b=26, c=9):
+def MACD(df, a=12, b=26, c=9, column='Close'):
     df = df.copy()
     df['EMA12'] = df['Close'].ewm(span=a, min_periods=a).mean()
     df['EMA26'] = df['Close'].ewm(span=b, min_periods=b).mean()
