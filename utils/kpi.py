@@ -52,7 +52,7 @@ def Sharpe(df, timeframe, column='Close', is_price=True):
     df = df.copy()
     c = CAGR(df, timeframe, column, is_price)
     v = volatility(df, timeframe, column, is_price)
-    return (c - 0.03) / v # Assuming 3% Risk-Free Rate
+    return (c - 0.07) / v # Assuming 7% Risk-Free Rate
 
 
 ## Sortino Ratio
