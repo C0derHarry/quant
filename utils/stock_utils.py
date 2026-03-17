@@ -33,7 +33,7 @@ def download_stock_data(stocks, days, interval):
     ohlcv_data = {}
 
     # 2. If only one stock was requested, yfinance returns a standard DF
-    # If multiple, it returns a Multi-Index. Let's handle both.
+    # If multiple, it returns a Multi-Index. This handles both.
     if len(stocks) == 1:
         ticker = stocks[0]
         if not full_df.empty:
