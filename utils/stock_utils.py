@@ -1,8 +1,9 @@
 import yfinance as yf
 import pandas as pd
 import datetime as dt
+from concurrent.futures import ThreadPoolExecutor
 
-def download_stock_data(stocks, days, interval):
+def fetch_ohlcv_data(stocks, days, interval):
     """
     Download ohlcv stock data for given stocks & return as a dict.
 
@@ -59,3 +60,44 @@ def download_stock_data(stocks, days, interval):
 
     print(f"Successfully downloaded {len(ohlcv_data)}/{len(stocks)} stocks.")
     return ohlcv_data
+
+
+# 1. Define a function for a single ticker download
+def fetch_financial_data(ticker_list):
+    """
+    Fetches balance sheet, financials, cash flow, and info for a list of tickers 
+    using multithreading for speed.
+    
+    Args:
+        ticker_list (list): List of NSE/BSE ticker strings.
+        max_workers (int): Number of simultaneous threads.
+        
+    Returns:
+        dict: A nested dictionary where keys are tickers and values are their data.
+    """
+    def fetch_single_ticker(ticker):
+        try:
+            tk = yf.Ticker(ticker)
+            # Return a tuple of the ticker name and its data dictionary
+            return ticker, {
+                "balance_sheet": tk.balance_sheet,
+                "financials": tk.financials,
+                "cash_flow": tk.cashflow,
+                "info": tk.info
+            }
+        except Exception as e:
+            print(f"Error for {ticker}: {e}")
+            return ticker, None
+
+    financial_dir = {}
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = executor.map(fetch_single_ticker, ticker_list)
+
+    # 3. Process the results into your main dictionary
+    for ticker, data in results:
+        if data:
+            financial_dir[ticker] = data
+
+    print("\n--- All downloads complete ---")
+    return financial_dir
