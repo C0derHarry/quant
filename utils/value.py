@@ -1,0 +1,94 @@
+import numpy as np
+import pandas as pd
+import os
+import sys
+
+current_dir = os.path.dirname(os.path.abspath("__file__"))
+project_root = os.path.abspath(os.path.join(current_dir, ".."))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+from utils.stock_utils import fetch_financial_data
+
+
+## Joel Greenblatt's magic formula
+
+import pandas as pd
+
+def magic_formula_rank(ticker_list):
+    '''
+    DO NOT PASS STOCKS BELONGING TO BANKING SECTOR
+    Uses Joel Greenblatt's magic formula to calculate the Earnings Yield and Return On Capital of all the stocks in your universe.
+    Return a dataframe of all the stocks with their individual Earnings Yield rank, ROC rank and combined rank.
+
+    Args:
+        ticker_list (List): List of all the stocks you want to compare
+
+    Returns:
+        rank_df (pd.DataFrame): df of all your stocks with individual and combined ranks
+    '''
+    financial_data = fetch_financial_data(ticker_list)
+
+    results = []
+
+    for ticker in ticker_list:
+        try: 
+            data = financial_data.get(ticker)
+            if not data: continue
+
+            # Extract Info metrics with fallback to 0
+            info = data['info']
+            total_cash = info.get('totalCash', 0) or 0
+            total_debt = info.get('totalDebt', 0) or 0
+            market_cap = info.get('marketCap', 0) or 0
+
+            print(f'total cash = {total_cash}, total debt = {total_debt}, market_cap = {market_cap}')
+
+            # Extract Financials/Balance Sheet
+            ebit_series = data['financials'].loc['EBIT']
+            net_ppe_series = data['balance_sheet'].loc['Net PPE']
+            curr_assets_series = data['balance_sheet'].loc['Current Assets']
+            curr_liabs_series = data['balance_sheet'].loc['Current Liabilities']
+
+            if any(x is None for x in [ebit_series, net_ppe_series, curr_assets_series, curr_liabs_series]):
+                print(f"Skipping {ticker}: Missing key line items.")
+                continue
+
+            EBIT = ebit_series.iloc[0]
+            fixed_assets = net_ppe_series.iloc[0]
+            working_capital = curr_assets_series.iloc[0] - curr_liabs_series.iloc[0]
+
+            print(f'EBIT = {EBIT}, fixed_assets = {fixed_assets}, working_capital = {working_capital}')
+            
+            # Formula Calculations
+            enterprise_value = market_cap + total_debt - total_cash
+            
+            # Earnings Yield: EBIT / EV
+            earnings_yield = EBIT / enterprise_value if enterprise_value > 0 else 0
+            
+            # ROC: EBIT / (Fixed Assets + Working Capital)
+            invested_capital = fixed_assets + working_capital
+            ROC = EBIT / invested_capital if invested_capital > 0 else 0
+
+            results.append({
+                "Ticker": ticker,
+                "Earnings Yield": earnings_yield,
+                "ROC": ROC
+            })
+
+        except Exception as e: 
+            print(f'Error calculating rank for {ticker}: {e}')
+
+    # 2. Create DataFrame
+    rank_df = pd.DataFrame(results)
+
+    # 3. Calculate Ranks
+    # For EY and ROC, higher is better, so we rank descending (ascending=False)
+    rank_df['EY Rank'] = rank_df['Earnings Yield'].rank(ascending=False)
+    rank_df['ROC Rank'] = rank_df['ROC'].rank(ascending=False)
+
+    # 4. Combined Rank
+    rank_df['Combined Rank'] = rank_df['EY Rank'] + rank_df['ROC Rank']
+    
+    # Sort by final rank (lower score is better)
+    return rank_df.sort_values('Combined Rank').reset_index(drop=True)
