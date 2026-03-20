@@ -92,3 +92,49 @@ def magic_formula_rank(ticker_list):
     
     # Sort by final rank (lower score is better)
     return rank_df.sort_values('Combined Rank').reset_index(drop=True)
+
+
+## Quality at a reasonable price (QARP)
+
+def qarp_screener(ticker_list):
+    '''
+
+    '''
+    financial_data = fetch_financial_data(ticker_list)
+
+    results = []
+    for ticker in ticker_list:
+        try:
+            info = financial_data.get(ticker)
+
+            # Return on equity(ROE) = Net Income/Shareholders Equity
+            net_income = info['financials'].loc['Net Income']
+            shareholders_equity = info['balance_sheet'].loc['Stockholders Equity']
+
+            return_on_equity = net_income.iloc[0]/shareholders_equity.iloc[0]
+
+            # --- Filter 2: Financial Health (Debt-to-Equity) ---
+            debt_to_equity = info['info'].get('debtToEquity')/100
+
+            # --- Filter 3: The Value Hook (P/E Ratios) ---
+            current_pe = info['info'].get('forwardPE')
+            trailing_pe = info['info'].get('trailingPE')
+            
+            # Logic Check
+            is_quality = return_on_equity > 0.20
+            is_healthy = debt_to_equity < 0.5
+            is_cheap = current_pe < 15 or current_pe < (trailing_pe * 0.9) # Simple proxy for 'on sale'
+
+            # if is_quality and is_healthy and is_cheap:
+            results.append({
+                "Ticker": ticker,
+                "ROE": f"{return_on_equity:.2%}",
+                "D/E": round(debt_to_equity, 2),
+                "Forward P/E": round(current_pe, 2)
+            })
+
+            
+        except Exception as e:
+            print(f"Could not process {ticker}: {e}")
+
+    return pd.DataFrame(results)
