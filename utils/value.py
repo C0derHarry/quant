@@ -98,7 +98,14 @@ def magic_formula_rank(ticker_list):
 
 def qarp_screener(ticker_list):
     '''
+    Gives you all the stocks within a particular sector that provide high quality but are currently at a very reasonable price. 
+    These stocks have high upside potential. 
 
+    Args: 
+        ticker_list (List): List of all the tickers
+
+    Returns: 
+        results_df (pd.Dataframe): 
     '''
     financial_data = fetch_financial_data(ticker_list)
 
