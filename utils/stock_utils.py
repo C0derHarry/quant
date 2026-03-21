@@ -3,6 +3,7 @@ import pandas as pd
 import datetime as dt
 from concurrent.futures import ThreadPoolExecutor
 
+## OHLCV data for tickers
 def fetch_ohlcv_data(stocks, days, interval):
     """
     Download ohlcv stock data for given stocks & return as a dict.
@@ -62,7 +63,7 @@ def fetch_ohlcv_data(stocks, days, interval):
     return ohlcv_data
 
 
-# 1. Define a function for a single ticker download
+# Financial data for tickers
 def fetch_financial_data(ticker_list):
     """
     Fetches balance sheet, financials, cash flow, and info for a list of tickers 
@@ -101,3 +102,35 @@ def fetch_financial_data(ticker_list):
 
     print("\n--- All downloads complete ---")
     return financial_dir
+
+# Sector-wise updates 
+
+def get_sector_updates():
+
+    SECTOR_TICKERS = {
+        "Technology":             "^CNXIT",    # Nifty IT
+        "Financial Services":     "^CNXFIN",   # Nifty Financial Services
+        "Healthcare":             "^CNXPHARMA",# Nifty Pharma
+        "Energy":                 "^CNXENERGY",# Nifty Energy
+        "Consumer Discretionary": "^CNXAUTO",  # Nifty Auto (closest proxy)
+        "Industrials":            "^CNXINFRA", # Nifty Infra
+        "FMCG":                   "^CNXFMCG",  # Nifty FMCG
+        "Metals":                 "^CNXMETAL", # Nifty Metal
+        "Nifty 50":               "^NSEI",     # Nifty 50
+        "Bank Nifty":             "^NSEBANK",  # Bank Nifty
+        "Fin Nifty":              "^CNXFIN",   # Fin Nifty
+        "Sensex":                 "^BSESN",    # Sensex
+    }
+
+    results = {}
+    for sector, ticker in SECTOR_TICKERS.items():
+        ticker_data = yf.Ticker(ticker)
+        info = ticker_data.fast_info
+        results[sector] = {
+            "price": info["last_price"],
+            "prev_close": info["previous_close"],
+            "change": info["last_price"] - info["previous_close"],
+            "pct_change": ((info["last_price"] - info["previous_close"]) / info["previous_close"]) * 100
+        }
+    
+    
