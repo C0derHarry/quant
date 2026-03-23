@@ -27,6 +27,9 @@ def magic_formula_rank(ticker_list):
     Returns:
         rank_df (pd.DataFrame): df of all your stocks with individual and combined ranks
     '''
+
+    ticker_list = [t if '.NS' in t else f'{t}.NS' for t in ticker_list]
+
     financial_data = fetch_financial_data(ticker_list)
 
     results = []
