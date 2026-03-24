@@ -4,6 +4,7 @@
 import streamlit as st
 import time
 import yfinance as yf
+from datetime import date, time
 from utils import fetch_all, render_card, INDICES, SECTORS
 
 def show_home():
@@ -11,7 +12,17 @@ def show_home():
     st.caption("Click on any sector to view stocks")
     st.markdown("---")
 
-    @st.fragment(run_every=10)
+    def is_market_open():
+        """Returns True if current time is between 09:15 and 15:30 IST."""
+        now = datetime.now().time()
+        market_start = time(9, 15)
+        market_end = time(15, 30)
+        return market_start <= now <= market_end
+
+    # Determine refresh interval: 5 seconds if open, None (off) if closed
+    refresh_interval = 5 if is_market_open() else None
+
+    @st.fragment(run_every=refresh_interval)
     def live_dashboard():
         data = fetch_all()
 
