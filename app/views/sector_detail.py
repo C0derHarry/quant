@@ -5,6 +5,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+from datetime import date, time
 from utils import fetch_stocks
 
 def show_sectors():
@@ -18,7 +19,15 @@ def show_sectors():
     st.caption("Click refresh to update · All prices in INR")
     st.markdown("---")
 
-    @st.fragment(run_every=5)
+    def is_market_open():
+        now = datetime.now().time()
+        market_start = time(9, 15)
+        market_end = time(15, 30)
+        return market_start <= now <= market_end
+
+    refresh_interval = 5 if is_market_open() else None
+
+    @st.fragment(run_every=refresh_interval)
     def sector_detail():
         with st.spinner("Fetching stocks..."):
             stocks = fetch_stocks(selected)

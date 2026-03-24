@@ -52,6 +52,41 @@ def Sharpe(df, timeframe, column='Close', is_price=True):
     v = volatility(df, timeframe, column, is_price)
     return (c - 0.07) / v # Assuming 7% Risk-Free Rate
 
+## Rolling Sharpe
+
+def rolling_sharpe(df, timeframe, window, column='Close', is_price=True):
+    """
+    USE YOUR OWN KNOWLEDGE TO MAKE THIS BETTER
+    args: 
+        df:         (pd.Dataframe) - Dataframe of returns/price
+        timeframe:  (int)          - 12 if monthly data, 252 if daily and so on 
+        window:     (int)          - how frequently you want to check the change in sharpe
+        column:     (string)       - which column of the passed df are we using
+        is_price:   (boolean)      - whether the passed column is price data or return data
+    returns:
+        rolling_df  (pd.DataFrame) - Dataframe with rolling sharpe for each window
+    """
+    df = df.copy()
+    
+    # 1. Get daily returns
+    if is_price:
+        df['return'] = df[column].pct_change()
+    else:
+        df['return'] = df[column]
+    
+    # 2. Calculate Rolling CAGR (Annualized Mean Return)
+    # window is the number of periods, timeframe is periods per year
+    rolling_ann_return = df['return'].rolling(window=window).mean() * timeframe
+    
+    # 3. Calculate Rolling Volatility (Annualized Std Dev)
+    rolling_vol = df['return'].rolling(window=window).std() * np.sqrt(timeframe)
+    
+    # 4. Calculate Rolling Sharpe
+    # Using your 7% Risk-Free Rate (0.07)
+    df['rolling_sharpe'] = (rolling_ann_return - 0.07) / rolling_vol
+    
+    return df
+
 
 ## Sortino Ratio
 
@@ -84,6 +119,26 @@ def max_dd(df, column='Close', is_price=True):
 def calamar(df, timeframe):
     df = df.copy()
     return CAGR(df, timeframe) / max_dd(df)
+
+## Rolling Alpha
+
+
+def rolling_alpha(strategy_returns, benchmark_returns, timeframe, window):
+    """
+    USE YOUR OWN KNOWLEDGE TO MAKE THIS BETTER
+    """
+    alphas = []
+    for i in range(window, len(strategy_returns)):
+        y = strategy_returns.iloc[i-window:i]
+        x = benchmark_returns.iloc[i-window:i]
+        x = sm.add_constant(x)
+        
+        model = sm.OLS(y, x).fit()
+        # model.params[0] is the Alpha (intercept)
+        alphas.append(model.params[0] * timeframe) # Annualized
+        
+    return pd.Series(alphas, index=strategy_returns.index[window:])
+
 
 
 ## Jensen's Alpha

@@ -4,7 +4,8 @@ import yfinance as yf
 import pandas as pd
 from nsetools import Nse
 from concurrent.futures import ThreadPoolExecutor
-from views import home, magic_rank, sector_detail
+from views import home, sector_detail
+from views.value import magic_rank
 
 st.set_page_config(page_title="StockHub", layout="wide")
 
