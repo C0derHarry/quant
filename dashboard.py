@@ -4,8 +4,9 @@ import yfinance as yf
 import pandas as pd
 from nsetools import Nse
 from concurrent.futures import ThreadPoolExecutor
-from utils.stock_utils import fetch_ohlcv_data
-from utils.value import magic_formula_rank
+from core.data import fetch_ohlcv_data
+from core.screeners import magic_formula_rank
+from core.stats import CAGR
 
 st.set_page_config(page_title="StockHub", layout="wide")
 
