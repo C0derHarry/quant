@@ -105,6 +105,9 @@ def qarp_screener(ticker_list):
     Returns: 
         results_df (pd.Dataframe): 
     '''
+
+    ticker_list = [t if '.NS' in t else f'{t}.NS' for t in ticker_list]
+
     financial_data = fetch_financial_data(ticker_list)
 
     results = []
