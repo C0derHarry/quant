@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+from statsmodels.stats.diagnostic import acorr_ljungbox
 
 ## Compounded Annual Growth Rate (CAGR)
 
@@ -146,12 +148,13 @@ def underwater_periods(df, column='Close', is_price=True):
             "end":          end,
             "duration":     duration,       # in periods (months if monthly data)
             "max_drawdown": max_dd,
-            "recovered":    not is_underwater.iloc[-1]  # has it recovered?
+            "recovered":    end != drawdown.index[-1]  # has it recovered?
         })
     
     return pd.DataFrame(periods).sort_values("max_drawdown")
 
-## summarise the drawdown
+
+## Summarise the drawdown
 
 def drawdown_summary(df, column='Close', is_price=True):
     dd, _, _ = drawdown_analysis(df, column, is_price)
@@ -163,6 +166,64 @@ def drawdown_summary(df, column='Close', is_price=True):
     print(f"Longest Underwater Period:  {uw['duration'].max()} periods")
     print(f"Number of Drawdowns:        {len(uw)}")
     print(f"Still Underwater:           {dd.iloc[-1] < 0}")
+
+
+## Volatility clustering
+
+def squared_returns_plot(df, column="Close", is_price=True, lags=20, significance=0.05):
+    df=df.copy()
+    if is_price:
+        returns = df[column].pct_change()
+    else:
+        returns = df[column]
+    squared_returns = returns ** 2
+    
+    # Calculate autocorrelations for each lag
+    acf_values = [squared_returns.autocorr(lag=i) for i in range(1, lags + 1)]
+    
+    # Significance bounds (95% confidence interval)
+    n = len(returns)
+    sig_bound = 1.96 / np.sqrt(n)
+    
+    # Ljung-Box test for overall significance
+    lb_test = acorr_ljungbox(squared_returns, lags=lags, return_df=True)
+    
+    # Plot
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+    
+    # --- Top: ACF bar chart ---
+    lags_range = range(1, lags + 1)
+    colors = ["red" if abs(v) > sig_bound else "steelblue" for v in acf_values]
+    
+    ax1.bar(lags_range, acf_values, color=colors, alpha=0.7, edgecolor="black", linewidth=0.5)
+    ax1.axhline(y=sig_bound,  color="red", linestyle="--", linewidth=1.2, label=f"95% CI (±{sig_bound:.3f})")
+    ax1.axhline(y=-sig_bound, color="red", linestyle="--", linewidth=1.2)
+    ax1.axhline(y=0, color="black", linewidth=0.8)
+    ax1.set_title("Squared Returns Autocorrelation (Volatility Clustering)", fontsize=14)
+    ax1.set_xlabel("Lag")
+    ax1.set_ylabel("Autocorrelation")
+    ax1.set_xticks(list(lags_range))
+    ax1.legend()
+    
+    # --- Bottom: Ljung-Box p-values ---
+    ax2.bar(lags_range, lb_test["lb_pvalue"], color="steelblue", alpha=0.7, edgecolor="black", linewidth=0.5)
+    ax2.axhline(y=significance, color="red", linestyle="--", linewidth=1.2, label=f"p = {significance}")
+    ax2.set_title("Ljung-Box Test p-values (H0: No Autocorrelation)", fontsize=14)
+    ax2.set_xlabel("Lag")
+    ax2.set_ylabel("p-value")
+    ax2.set_xticks(list(lags_range))
+    ax2.legend()
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Summary
+    sig_lags = [i+1 for i, v in enumerate(acf_values) if abs(v) > sig_bound]
+    print(f"Significant lags: {sig_lags}")
+    print(f"Ljung-Box p-value at lag 20: {lb_test['lb_pvalue'].iloc[-1]:.4f}")
+    print(f"Volatility clustering present: {lb_test['lb_pvalue'].iloc[-1] < significance}")
+    
+    return pd.DataFrame({"lag": list(lags_range), "acf": acf_values, "significant": [abs(v) > sig_bound for v in acf_values]})
 
 ## Rolling Alpha
 
