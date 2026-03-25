@@ -4,7 +4,7 @@
 import streamlit as st
 import time
 import yfinance as yf
-from datetime import date, time
+from datetime import datetime, time
 from utils import fetch_all, render_card, INDICES, SECTORS
 
 def show_home():
@@ -51,6 +51,6 @@ def show_home():
             if name in data:
                 render_card(sector_cols[i % 2], name, data[name])
 
-        st.caption(f"Last updated: {time.strftime('%H:%M:%S')}")
+        st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
 
     live_dashboard()

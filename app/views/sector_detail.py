@@ -5,7 +5,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from datetime import date, time
+from datetime import datetime, time
 from utils import fetch_stocks
 
 def show_sectors():
@@ -89,6 +89,6 @@ def show_sectors():
         </table>
         """, unsafe_allow_html=True)
 
-        st.caption(f"Last updated: {time.strftime('%H:%M:%S')} · {len(rows)} stocks")
+        st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')} · {len(rows)} stocks")
 
     sector_detail()
