@@ -55,42 +55,24 @@ def Sharpe(df, timeframe, column='Close', is_price=True):
 ## Rolling Sharpe
 
 def rolling_sharpe(df, timeframe, window, column='Close', is_price=True):
-    """
-    USE YOUR OWN KNOWLEDGE TO MAKE THIS BETTER
-    args: 
-        df:         (pd.Dataframe) - Dataframe of returns/price
-        timeframe:  (int)          - 12 if monthly data, 252 if daily and so on 
-        window:     (int)          - how frequently you want to check the change in sharpe
-        column:     (string)       - which column of the passed df are we using
-        is_price:   (boolean)      - whether the passed column is price data or return data
-    returns:
-        rolling_df  (pd.DataFrame) - Dataframe with rolling sharpe for each window
-    """
     df = df.copy()
     
-    # 1. Get daily returns
     if is_price:
         df['return'] = df[column].pct_change()
     else:
         df['return'] = df[column]
     
-    # 2. Calculate Rolling CAGR (Annualized Mean Return)
-    # window is the number of periods, timeframe is periods per year
-    rolling_ann_return = df['return'].rolling(window=window).mean() * timeframe
-    
-    # 3. Calculate Rolling Volatility (Annualized Std Dev)
-    rolling_vol = df['return'].rolling(window=window).std() * np.sqrt(timeframe)
-    
-    # 4. Calculate Rolling Sharpe
-    # Using your 7% Risk-Free Rate (0.07)
-    df['rolling_sharpe'] = (rolling_ann_return - 0.07) / rolling_vol
-    
-    return df
+    df['excess_returns'] = df['return'] - 0.07/timeframe
+    rolling_mean = df['excess_returns'].rolling(window=window).mean()
+    rolling_std = df['excess_returns'].rolling(window=window).std()
+
+    df['rolling_sharpe'] = (rolling_mean/rolling_std) * np.sqrt(timeframe)
+    return df['rolling_sharpe']
 
 
 ## Sortino Ratio
 
-def Sortino(df, rfr, timeframe):
+def Sortino(df, timeframe, rfr=0.07):
     df = df.copy()
     cagr = CAGR(df)
     df['return'] = df['Close'].pct_change()
@@ -120,8 +102,69 @@ def calamar(df, timeframe):
     df = df.copy()
     return CAGR(df, timeframe) / max_dd(df)
 
-## Rolling Alpha
 
+## Drawdown Duration
+
+def drawdown_analysis(df, column='Close', is_price=True):
+    df=df.copy()
+    if is_price:
+        df['return'] = df[column].pct_change()
+    else:
+        df['return'] = df[column]
+    cum_returns = (1 + df['return']).cumprod()
+    
+    # Running maximum (the "high water mark")
+    rolling_max = cum_returns.cummax()
+    
+    # Drawdown at each point
+    drawdown = (cum_returns - rolling_max) / rolling_max
+    
+    return drawdown, cum_returns, rolling_max
+
+
+## Underwater Periods
+
+def underwater_periods(df, column='Close', is_price=True):
+    drawdown, cum_returns, rolling_max = drawdown_analysis(df, column, is_price)
+    
+    # Boolean mask: are we underwater?
+    is_underwater = drawdown < 0
+    
+    # Label each consecutive underwater streak
+    streak_id = (is_underwater != is_underwater.shift()).cumsum()
+    streak_id = streak_id.where(is_underwater)  # only keep underwater streaks
+    
+    periods = []
+    for sid, group in drawdown.groupby(streak_id):
+        start = group.index[0]
+        end = group.index[-1]
+        duration = len(group)
+        max_dd = drawdown.loc[start:end].min()
+        
+        periods.append({
+            "start":        start,
+            "end":          end,
+            "duration":     duration,       # in periods (months if monthly data)
+            "max_drawdown": max_dd,
+            "recovered":    not is_underwater.iloc[-1]  # has it recovered?
+        })
+    
+    return pd.DataFrame(periods).sort_values("max_drawdown")
+
+## summarise the drawdown
+
+def drawdown_summary(df, column='Close', is_price=True):
+    dd, _, _ = drawdown_analysis(df, column, is_price)
+    uw        = underwater_periods(df, column, is_price)
+    
+    print(f"Max Drawdown:               {dd.min():.2%}")
+    print(f"Current Drawdown:           {dd.iloc[-1]:.2%}")
+    print(f"Avg Underwater Duration:    {uw['duration'].mean():.1f} periods")
+    print(f"Longest Underwater Period:  {uw['duration'].max()} periods")
+    print(f"Number of Drawdowns:        {len(uw)}")
+    print(f"Still Underwater:           {dd.iloc[-1] < 0}")
+
+## Rolling Alpha
 
 def rolling_alpha(strategy_returns, benchmark_returns, timeframe, window):
     """
