@@ -4,8 +4,7 @@ import yfinance as yf
 import pandas as pd
 from nsetools import Nse
 from concurrent.futures import ThreadPoolExecutor
-from views import home, sector_detail
-from views.value import magic_rank
+from views import home, sector_detail, value_screen
 
 st.set_page_config(page_title="StockHub", layout="wide")
 
@@ -21,10 +20,9 @@ if st.sidebar.button("🏠 Market Sectors"):
     st.session_state.page = "home"
     st.rerun()
 st.sidebar.markdown("**Value Investing**")
-if st.sidebar.button("Magic Rank"):
-    st.session_state.page = "magic_rank"
+if st.sidebar.button("Undervalued stocks"):
+    st.session_state.page = "value_screen"
     st.rerun()
-st.sidebar.button("QARP Screener")
 st.sidebar.button("Defensive Screen")
 
 # ── Router Logic ──────────────────────────────────────────────────────
@@ -33,5 +31,5 @@ if st.session_state.page == "home":
     home.show_home()
 elif st.session_state.page == "sector":
     sector_detail.show_sectors()
-elif st.session_state.page == "magic_rank":
-    magic_rank.run_magic_rank()
+elif st.session_state.page == "value_screen":
+    value_screen.value_investing()
