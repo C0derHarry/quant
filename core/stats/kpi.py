@@ -19,10 +19,6 @@ def CAGR(df, timeframe, column='Close', is_price=True):
         float: CAGR
     """
     df = df.copy()
-
-    # if column not in df.columns:
-    #     raise ValueError(f"Column '{column}' not found in DataFrame.")
-
     if is_price:
         df['return'] = df[column].pct_change()
     else:
@@ -33,6 +29,19 @@ def CAGR(df, timeframe, column='Close', is_price=True):
     cagr = df['cum_return'].iloc[-1] ** (1/n) - 1
     return cagr
 
+
+def rolling_cagr(df, timeframe, window, column='Close', is_price=True):
+    df = df.copy()
+    returns = df[column].pct_change() if is_price else df[column]
+    
+    # Use apply(np.prod) or .prod() for the rolling window
+    rolling_prod = (1 + returns).rolling(window=window).apply(np.prod, raw=True)
+    
+    # Calculate years in the window
+    window_in_years = window / timeframe
+    
+    # Return a Series of CAGR values
+    return (rolling_prod ** (1 / window_in_years)) - 1
 
 ## Volaitility 
 
@@ -100,10 +109,38 @@ def max_dd(df, column='Close', is_price=True):
 
 ## Calamar Ratio
 
-def calamar(df, timeframe):
+def calmar(df, timeframe):
     df = df.copy()
     return CAGR(df, timeframe) / max_dd(df)
 
+
+## Rolling Calamar Ratio
+
+def rolling_calmar(df, timeframe, window, column='Close', is_price=True):
+    df = df.copy()
+    
+    # 1. Get Rolling CAGR Series
+    df['rolling_cagr'] = rolling_cagr(df, timeframe, window, column, is_price)
+    
+    # 2. Setup returns
+    rets = df[column].pct_change() if is_price else df[column]
+    
+    # 3. Calculate Rolling Max Drawdown
+    # We define a helper to find MDD within a single window
+    def get_mdd(x):
+        wealth = (1 + x).cumprod()
+        peak = wealth.cummax()
+        drawdown = (wealth - peak) / peak
+        return abs(drawdown.min()) # Return as positive number
+
+    df['rolling_mdd'] = rets.rolling(window=window).apply(get_mdd, raw=False)
+    
+    # 4. Calculate Calmar (CAGR / MDD)
+    # Avoid division by zero if MDD is 0
+    df['rolling_calmar'] = df['rolling_cagr'] / df['rolling_mdd'].replace(0, np.nan)
+    
+    return df['rolling_calmar']
+    
 
 ## Drawdown Duration
 
@@ -173,16 +210,16 @@ def drawdown_summary(df, column='Close', is_price=True):
 def squared_returns_plot(df, column="Close", is_price=True, lags=20, significance=0.05):
     df=df.copy()
     if is_price:
-        returns = df[column].pct_change()
+        df['return'] = df[column].pct_change()
     else:
-        returns = df[column]
-    squared_returns = returns ** 2
+        df['return'] = df[column]
+    squared_returns = df['return'] ** 2
     
     # Calculate autocorrelations for each lag
     acf_values = [squared_returns.autocorr(lag=i) for i in range(1, lags + 1)]
     
     # Significance bounds (95% confidence interval)
-    n = len(returns)
+    n = len(df['return'])
     sig_bound = 1.96 / np.sqrt(n)
     
     # Ljung-Box test for overall significance
