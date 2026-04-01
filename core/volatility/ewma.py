@@ -1,17 +1,14 @@
 """
-EWMA Volatility Model — Reliance Industries (RELIANCE.NS)
+EWMA Volatility Model 
 =========================================================
 Implements:
   1. ewma_variance()        — recursive EWMA with configurable λ
   2. Annualisation          — σ_annual = σ_daily × √252
-  3. EWMA vs Rolling Std    — overlay plot, highlights COVID crash & earnings spikes
+  3. EWMA vs Rolling Std    — overlay plot, highlights crashes & spikes
   4. Lambda sensitivity     — sweep λ ∈ [0.90, 0.99], visualise decay speed differences
+  5. Minimize loss          — calculate loss for each value of λ to find the exact value that fits the data
 
-Data: synthetic Reliance-like price series (seeded) that reproduces realistic
-      vol regimes: pre-COVID drift → COVID crash (Mar 2020) → recovery →
-      FY22 earnings surprise → gradual mean reversion.
-      Swap in real data by replacing `generate_reliance_prices()` with a
-      yfinance / NSE CSV loader.
+Data: series of returns downloaded via yfinance
 """
 
 import numpy as np
@@ -20,6 +17,8 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import FancyArrowPatch
+from scipy.optimize import minimize_scalar
+from scipy.stats import norm
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -110,8 +109,8 @@ def plot_ewma_vs_rolling(
 ) -> None:
     """
     Two-panel figure:
-      Top    : Reliance price (context)
-      Bottom : Annualised EWMA vol vs rolling std, with event annotations
+      Top    : Price
+      Bottom : Annualised EWMA vol vs rolling std
     """
     log_ret = np.log(prices / prices.shift(1)).dropna()
 
@@ -124,7 +123,7 @@ def plot_ewma_vs_rolling(
         sharex=True,
     )
     fig.suptitle(
-        "Reliance Industries — EWMA vs Rolling Volatility\n"
+        "EWMA vs Rolling Volatility\n"
         f"(λ={lambda_}, rolling window={window}d)",
         fontsize=14, fontweight="bold", y=0.98,
     )
@@ -265,9 +264,32 @@ def decay_table(lambdas: list[float] | None = None) -> pd.DataFrame:
 
     return pd.DataFrame(rows).set_index("λ")
 
+# ─────────────────────────────────────────────
+# 5.  Minimise the loss function 
+# ─────────────────────────────────────────────
+
+def get_nll(lam, returns):
+    """
+    Objective function for the optimizer.
+    Calculates the NLL for a given lambda.
+    """
+    T = len(returns)
+    variances = np.zeros(T)
+    variances[0] = np.var(returns)
+    
+    # Calculate EWMA variances
+    # sigma2_t = lam * sigma2_{t-1} + (1 - lam) * r_{t-1}^2
+    for t in range(1, T):
+        variances[t] = lam * variances[t-1] + (1 - lam) * (returns.iloc[t-1]**2)
+    
+    # We ignore the constant term (0.5 * log(2*pi)) as it doesn't shift the minimum
+    # Adding a small epsilon to variances to ensure numerical stability
+    nll = 0.5 * np.sum(np.log(variances + 1e-10) + (returns**2) / (variances + 1e-10))
+    return nll
+
 
 # ─────────────────────────────────────────────
-# 5.  Main
+# 6.  Main
 # ─────────────────────────────────────────────
 
 def main() -> None:
@@ -276,11 +298,32 @@ def main() -> None:
     print("=" * 60)
 
     # prices = generate_reliance_prices()
-    log_ret = np.log(prices / prices.shift(1)).dropna()
+    returns = prices.pct_change().dropna()
+    log_ret = np.log(prices.pct_change()).dropna()
+
+    # 1. Run the optimization
+    # We restrict the search 'bounds' to your specific range (0.90 to 0.99)
+    res = minimize_scalar(get_nll, args=(returns,), bounds=(0.90, 0.99), method='bounded')
+
+    best_lambda = res.x
+    min_nll = res.fun
+
+    print(f"Optimal Lambda: {best_lambda:.6f}")
+    print(f"Minimized NLL: {min_nll:.4f}")
 
     # ── Quick stats ──────────────────────────────────────────────────────
-    ewma_vol = ewma_volatility(log_ret, lambda_=0.94)
+    ewma_vol = ewma_volatility(log_ret, lambda_= best_lambda)
     roll_vol = rolling_volatility(log_ret, window=21)
+
+    # ── Value at Risk ────────────────────────────────────────────────────
+    confidence_level = 0.95
+    position_value = 1000000  # $1,000,000 portfolio
+    z_score = norm.ppf(confidence_level)
+    ewma_var = ewma_variance(returns, lambda_=best_lambda)
+    volatility_series = np.sqrt(ewma_var)
+    var_series = position_value * z_score * volatility_series
+    var_df = pd.Series(var_series, index=returns.index)
+    print(f"Current 1-Day Value at Risk (95% Confidence): ${var_df.iloc[-1]:,.2f}")
 
     print(f"\nDate range  : {prices.index[0].date()} → {prices.index[-1].date()}")
     print(f"Trading days: {len(prices):,}")
@@ -299,8 +342,10 @@ def main() -> None:
     print(tbl.to_string())
 
     # ── Plots ──────────────────────────────────────────────────────────
-    plot_ewma_vs_rolling(prices)
+    plot_ewma_vs_rolling(prices, best_lambda)
     plot_lambda_sensitivity(prices)
+    plt.plot(var_df)
+    plt.show()
 
     print("\n[✓] All done.")
 
