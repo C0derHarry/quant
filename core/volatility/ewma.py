@@ -292,7 +292,7 @@ def get_nll(lam, returns):
 # 6.  Main
 # ─────────────────────────────────────────────
 
-def main() -> None:
+def run_ewma(ticker_list) -> None:
     print("=" * 60)
     print("  EWMA Volatility — Reliance Industries")
     print("=" * 60)
