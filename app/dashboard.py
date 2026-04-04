@@ -4,7 +4,7 @@ import yfinance as yf
 import pandas as pd
 from nsetools import Nse
 from concurrent.futures import ThreadPoolExecutor
-from views import home, sector_detail, value_screen, stock_fundamentals
+from views import home, sector_detail, value_screen, stock_fundamentals, vol_forecast, position_sizing
 
 st.set_page_config(page_title="StockHub", layout="wide")
 
@@ -26,7 +26,13 @@ if st.sidebar.button("Undervalued stocks"):
 if st.sidebar.button("Deep Dive"):
     st.session_state.page = "stock_fundamentals"
     st.rerun()
-
+st.sidebar.markdown("**Build Portfolio**")
+if st.sidebar.button("Volatility Forecasting"):
+    st.session_state.page = "vol_forecast"
+    st.rerun()
+if st.sidebar.button("Postion Sizing"):
+    st.session_state.page = "pos_sizing"
+    st.rerun()
 
 # ── Router Logic ──────────────────────────────────────────────────────
 
@@ -38,3 +44,7 @@ elif st.session_state.page == "value_screen":
     value_screen.value_investing()
 elif st.session_state.page == "stock_fundamentals":
     stock_fundamentals.get_fundamentals()
+elif st.session_state.page == "vol_forecast":
+    vol_forecast.show_vol_forecast()
+elif st.session_state.page == "pos_sizing":
+    position_sizing.run_pos_sizing()
