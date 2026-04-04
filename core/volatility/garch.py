@@ -81,121 +81,121 @@ def run_garch(returns):
     
     print(f"Setting upper bounds for alpha and beta as {best_q}, {best_p}")
 
-    # models = {}
-    # for p in range(1, best_q+1):
-    #     for q in range(1, best_p+1):
-    #         result = arch_model(returns, vol='Garch', p=p, q=q).fit(disp='off', options={'maxiter': 1000})
-    #         params = result.params              # Coefficients
-    #         pvalues = result.pvalues            # P-values
-    #         tvalues = result.tvalues            # t-statistics
-    #         std_err = result.std_err            # Standard errors
-    #         conf_int = result.conf_int()        # 95% Confidence intervals (DataFrame)
+    models = {}
+    for p in range(1, best_q+1):
+        for q in range(1, best_p+1):
+            result = arch_model(returns, vol='Garch', p=p, q=q).fit(disp='off', options={'maxiter': 1000})
+            params = result.params              # Coefficients
+            pvalues = result.pvalues            # P-values
+            tvalues = result.tvalues            # t-statistics
+            std_err = result.std_err            # Standard errors
+            conf_int = result.conf_int()        # 95% Confidence intervals (DataFrame)
 
-    #         # Combine into one clean DataFrame
-    #         summary_df = pd.DataFrame({
-    #             'coef': params,
-    #             'std_err': std_err,
-    #             't_stat': tvalues,
-    #             'p_value': pvalues,
-    #             'ci_lower': conf_int['lower'],
-    #             'ci_upper': conf_int['upper']
-    #         })
-    #         garch_terms = summary_df[
-    #             summary_df.index.str.startswith('alpha') |
-    #             summary_df.index.str.startswith('beta')
-    #         ]
+            # Combine into one clean DataFrame
+            summary_df = pd.DataFrame({
+                'coef': params,
+                'std_err': std_err,
+                't_stat': tvalues,
+                'p_value': pvalues,
+                'ci_lower': conf_int['lower'],
+                'ci_upper': conf_int['upper']
+            })
+            garch_terms = summary_df[
+                summary_df.index.str.startswith('alpha') |
+                summary_df.index.str.startswith('beta')
+            ]
 
-    #         all_significant = (garch_terms['p_value'] < 0.05).all()
+            all_significant = (garch_terms['p_value'] < 0.05).all()
 
-    #         if result.convergence_flag == 0:
-    #             print("Optimization Successful")
-    #         else:
-    #             print(f"Optimization Failed with flag: {result.convergence_flag}")
+            if result.convergence_flag == 0:
+                print("Optimization Successful")
+            else:
+                print(f"Optimization Failed with flag: {result.convergence_flag}")
 
-    #         if all_significant:
-    #             print("✅ All GARCH parameters are significant.")
-    #         else:
-    #             insignificant = garch_terms[garch_terms['p_value'] >= 0.05]
-    #             print("❌ Insignificant parameters found:")
-    #             print(insignificant[['coef', 'p_value']])
-    #         models[f'GARCH({p},{q})'] = {'AIC': result.aic, 'BIC': result.bic}
+            if all_significant:
+                print("✅ All GARCH parameters are significant.")
+            else:
+                insignificant = garch_terms[garch_terms['p_value'] >= 0.05]
+                print("❌ Insignificant parameters found:")
+                print(insignificant[['coef', 'p_value']])
+            models[f'GARCH({p},{q})'] = {'AIC': result.aic, 'BIC': result.bic}
 
-    # for p in range(1, best_p+1):
-    #     result = arch_model(returns, vol='Garch', p=p).fit(disp='off', options={'maxiter': 1000})
-    #     params = result.params              # Coefficients
-    #     pvalues = result.pvalues            # P-values
-    #     tvalues = result.tvalues            # t-statistics
-    #     std_err = result.std_err            # Standard errors
-    #     conf_int = result.conf_int()        # 95% Confidence intervals (DataFrame)
+    for p in range(1, best_p+1):
+        result = arch_model(returns, vol='Garch', p=p).fit(disp='off', options={'maxiter': 1000})
+        params = result.params              # Coefficients
+        pvalues = result.pvalues            # P-values
+        tvalues = result.tvalues            # t-statistics
+        std_err = result.std_err            # Standard errors
+        conf_int = result.conf_int()        # 95% Confidence intervals (DataFrame)
 
-    #     # Combine into one clean DataFrame
-    #     summary_df = pd.DataFrame({
-    #         'coef': params,
-    #         'std_err': std_err,
-    #         't_stat': tvalues,
-    #         'p_value': pvalues,
-    #         'ci_lower': conf_int['lower'],
-    #         'ci_upper': conf_int['upper']
-    #     })
-    #     garch_terms = summary_df[
-    #         summary_df.index.str.startswith('alpha') |
-    #         summary_df.index.str.startswith('beta')
-    #     ]
+        # Combine into one clean DataFrame
+        summary_df = pd.DataFrame({
+            'coef': params,
+            'std_err': std_err,
+            't_stat': tvalues,
+            'p_value': pvalues,
+            'ci_lower': conf_int['lower'],
+            'ci_upper': conf_int['upper']
+        })
+        garch_terms = summary_df[
+            summary_df.index.str.startswith('alpha') |
+            summary_df.index.str.startswith('beta')
+        ]
 
-    #     all_significant = (garch_terms['p_value'] < 0.05).all()
+        all_significant = (garch_terms['p_value'] < 0.05).all()
 
-    #     if result.convergence_flag == 0:
-    #         print("Optimization Successful")
-    #     else:
-    #         print(f"Optimization Failed with flag: {result.convergence_flag}")
+        if result.convergence_flag == 0:
+            print("Optimization Successful")
+        else:
+            print(f"Optimization Failed with flag: {result.convergence_flag}")
 
-    #     if all_significant:
-    #         print("✅ All GARCH parameters are significant.")
-    #     else:
-    #         insignificant = garch_terms[garch_terms['p_value'] >= 0.05]
-    #         print("❌ Insignificant parameters found:")
-    #         print(insignificant[['coef', 'p_value']])
-    #     models[f'GARCH({p},0)'] = {'AIC': result.aic, 'BIC': result.bic}
+        if all_significant:
+            print("✅ All GARCH parameters are significant.")
+        else:
+            insignificant = garch_terms[garch_terms['p_value'] >= 0.05]
+            print("❌ Insignificant parameters found:")
+            print(insignificant[['coef', 'p_value']])
+        models[f'GARCH({p},0)'] = {'AIC': result.aic, 'BIC': result.bic}
 
 
-    # for q in range(1, best_q+1):
-    #     result = arch_model(returns, vol='Garch', q=q).fit(disp='off', options={'maxiter': 1000})
-    #     params = result.params              # Coefficients
-    #     pvalues = result.pvalues            # P-values
-    #     tvalues = result.tvalues            # t-statistics
-    #     std_err = result.std_err            # Standard errors
-    #     conf_int = result.conf_int()        # 95% Confidence intervals (DataFrame)
+    for q in range(1, best_q+1):
+        result = arch_model(returns, vol='Garch', q=q).fit(disp='off', options={'maxiter': 1000})
+        params = result.params              # Coefficients
+        pvalues = result.pvalues            # P-values
+        tvalues = result.tvalues            # t-statistics
+        std_err = result.std_err            # Standard errors
+        conf_int = result.conf_int()        # 95% Confidence intervals (DataFrame)
 
-    #     # Combine into one clean DataFrame
-    #     summary_df = pd.DataFrame({
-    #         'coef': params,
-    #         'std_err': std_err,
-    #         't_stat': tvalues,
-    #         'p_value': pvalues,
-    #         'ci_lower': conf_int['lower'],
-    #         'ci_upper': conf_int['upper']
-    #     })
-    #     garch_terms = summary_df[
-    #         summary_df.index.str.startswith('alpha') |
-    #         summary_df.index.str.startswith('beta')
-    #     ]
+        # Combine into one clean DataFrame
+        summary_df = pd.DataFrame({
+            'coef': params,
+            'std_err': std_err,
+            't_stat': tvalues,
+            'p_value': pvalues,
+            'ci_lower': conf_int['lower'],
+            'ci_upper': conf_int['upper']
+        })
+        garch_terms = summary_df[
+            summary_df.index.str.startswith('alpha') |
+            summary_df.index.str.startswith('beta')
+        ]
 
-    #     all_significant = (garch_terms['p_value'] < 0.05).all()
+        all_significant = (garch_terms['p_value'] < 0.05).all()
 
-    #     if result.convergence_flag == 0:
-    #         print("Optimization Successful")
-    #     else:
-    #         print(f"Optimization Failed with flag: {result.convergence_flag}")
+        if result.convergence_flag == 0:
+            print("Optimization Successful")
+        else:
+            print(f"Optimization Failed with flag: {result.convergence_flag}")
 
-    #     if all_significant:
-    #         print("✅ All GARCH parameters are significant.")
-    #     else:
-    #         insignificant = garch_terms[garch_terms['p_value'] >= 0.05]
-    #         print("❌ Insignificant parameters found:")
-    #         print(insignificant[['coef', 'p_value']])
-    #     models[f'GARCH(0,{q})'] = {'AIC': result.aic, 'BIC': result.bic}
+        if all_significant:
+            print("✅ All GARCH parameters are significant.")
+        else:
+            insignificant = garch_terms[garch_terms['p_value'] >= 0.05]
+            print("❌ Insignificant parameters found:")
+            print(insignificant[['coef', 'p_value']])
+        models[f'GARCH(0,{q})'] = {'AIC': result.aic, 'BIC': result.bic}
 
-    # print(pd.DataFrame(models).T.sort_values('BIC'))
+    print(pd.DataFrame(models).T.sort_values('BIC'))
 
     # ──  Grid search for best (p, q) by BIC ─────────────────────────────────
     best_bic = np.inf
