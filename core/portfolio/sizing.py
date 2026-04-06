@@ -238,16 +238,28 @@ def detect_regimes(returns_df: pd.DataFrame, n_states: int = 3) -> dict:
         hmm.fit(features)
         states_seq = hmm.predict(features)
 
-        # Label states by mean return
+        # Label states by mean return and volatility
         state_mean_ret = {}
-        for s in range(n_states):
+        state_vol = {}
+        for s in range(3):
             mask = states_seq == s
             state_mean_ret[s] = ret[mask].mean() if mask.sum() > 0 else 0.0
+            state_vol[s] = ret[mask].std() if mask.sum() > 0 else 0.0
 
-        sorted_states = sorted(state_mean_ret.items(), key=lambda x: x[1])
-        bear_state   = sorted_states[0][0]
-        side_state   = sorted_states[1][0]
-        bull_state   = sorted_states[2][0]
+        state_score = {}
+        for s in range(3):
+            # normalize both metrics
+            ret_norm = (state_mean_ret[s] - np.mean(list(state_mean_ret.values())))
+            vol_norm = (state_vol[s] - np.mean(list(state_vol.values())))
+        
+            # higher return good, higher vol bad
+            state_score[s] = ret_norm - vol_norm
+
+        sorted_states = sorted(state_score.items(), key=lambda x: x[1])
+
+        bear_state = sorted_states[0][0]
+        side_state = sorted_states[1][0]
+        bull_state = sorted_states[2][0]
 
         label_map = {bear_state: "Bear", side_state: "Sideways", bull_state: "Bull"}
         current_label = label_map[states_seq[-1]]
