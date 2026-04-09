@@ -92,7 +92,7 @@ def fit_garch_single(return_series: pd.Series) -> dict:
     Returns forecasted daily sigma and standardized residuals.
     """
     scaled = return_series * 100  # GARCH works better on percentage returns
-    model = arch_model(scaled, vol="Garch", p=1, q=1, dist="normal", rescale=False)
+    model = arch_model(scaled, vol="Garch", p=1, q=1, dist="t", rescale=False)
     res = model.fit(disp="off", show_warning=False, options={'maxiter': 1000})
 
     # 1-step ahead forecast
@@ -473,7 +473,6 @@ def mean_variance_optimize(
         "annual_vol": port_vol,
         "monthly_vol": port_vol / np.sqrt(12),
         "sharpe": excess_return / port_vol if port_vol > 0 else 0,
-        "sharpe": port_ret / port_vol if port_vol > 0 else 0,
         "var_95_monthly": (port_vol / np.sqrt(12)) * z_95,
     }
 
@@ -772,5 +771,5 @@ if __name__ == "__main__":
         allow_short=ALLOW_SHORT,
         invest_mode=INVEST_MODE,
         dca_months=DCA_MONTHS,
-        stop_loss_k=STOP_LOSS_Ks
+        stop_loss_k=STOP_LOSS_K
     )
