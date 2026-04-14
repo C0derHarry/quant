@@ -2,38 +2,6 @@
 ============================================================
 PORTFOLIO OPTIMIZER: GARCH + DCC-GARCH + HMM + Black-Litterman MVO
 ============================================================
-
-Use the GARCH volatility to get the stop loss for each stock. 
-For the expected return, take a user input of their target return, 
-but also compare it to the predicted return from our model. For the predicted return, 
-first use HMM to check which regime we are in. Ask the user if they want to allow shorting, 
-if they want to invest fully or invest that amount over a period of let's say 6 months 
-and their risk appetite (how much they are willing to lose per month). 
-Then use mean-variance optimization to maximize expected return. 
-If there are multiple stocks, use DCC-GARCH to get the time-varying correlations 
-alongside time-varying volatilites, adjusting stop losses accrodingly. 
-
-
-Improvements:
-
-Replace pure MVO with Black-Litterman — 
-    standard MVO is notorious for being hypersensitive to expected return inputs. 
-    Black-Litterman blends market equilibrium returns with your HMM-derived views, 
-    making allocations far more stable
-
-CVaR constraint instead of variance — 
-    variance penalizes upside equally. CVaR only constrains tail losses, 
-    which is what the user actually cares about
-
-Add regime-change rebalancing triggers — 
-    don't just rebalance monthly; rebalance immediately when HMM detects a regime shift
-
-Portfolio-level stop loss in addition to individual stops — 
-    individual stops can cascade in a correlated downturn
-
-Momentum blend into expected returns — 
-    regime mean alone is too noisy; add 1M/3M momentum as a secondary signal
-============================================================
 """
 
 import numpy as np
@@ -60,24 +28,65 @@ def fetch_data(tickers: list, period: str = "5y") -> tuple[pd.DataFrame, pd.Data
     """Fetch adjusted closing prices and compute log returns."""
     print(f"    Downloading {len(tickers)} stocks over {period}...")
     raw = yf.download(tickers, period=period, auto_adjust=True, progress=False)["Close"]
-    raw = raw[tickers].dropna()
+
+    # Single-ticker download returns a Series — promote to DataFrame
+    if isinstance(raw, pd.Series):
+        raw = raw.to_frame(tickers[0])
+
+    # Keep only tickers that actually came back
+    available = [t for t in tickers if t in raw.columns]
+    missing   = [t for t in tickers if t not in raw.columns]
+    if missing:
+        print(f"    ⚠️  No data returned for: {missing}. Proceeding without them.")
+    if not available:
+        raise ValueError(
+            f"yfinance returned no data for any of: {tickers}. "
+            "Check the ticker symbols and your internet connection."
+        )
+
+    raw = raw[available]
+
+    # Drop rows where ALL columns are NaN, then forward-fill short gaps (≤5 days)
+    raw = raw.dropna(how="all").ffill(limit=5).dropna()
+
+    if raw.empty:
+        raise ValueError(
+            f"Price data for {available} is empty after cleaning. "
+            "Try a shorter period or check the ticker symbols."
+        )
+
     log_returns = np.log(raw / raw.shift(1)).dropna()
-    print(f"    {len(log_returns)} trading days loaded ({log_returns.index[0].date()} → {log_returns.index[-1].date()})")
+
+    if log_returns.empty:
+        raise ValueError(
+            f"Could not compute returns for {available} — "
+            "price series may be too short."
+        )
+
+    print(
+        f"    {len(log_returns)} trading days loaded "
+        f"({log_returns.index[0].date()} → {log_returns.index[-1].date()})"
+    )
     return raw, log_returns
 
+
 def get_market_caps(tickers: list) -> dict:
-    """Fetch the market cap for each ticker"""
+    """Fetch the market cap for each ticker."""
     market_caps = {}
     financial_data = fetch_financial_data(tickers)
 
     for ticker in tickers:
         data = financial_data.get(ticker)
-        if not data: continue
-
-        # Extract Info metrics with fallback to 0
+        if not data:
+            continue
         info = data['info']
         market_cap = info.get('marketCap', 0) or 0
-        market_caps[ticker] = market_cap
+        # Fallback: use equal weight proxy if market cap is unavailable
+        market_caps[ticker] = market_cap if market_cap > 0 else 1
+
+    # If all came back zero, return equal weights
+    if sum(market_caps.values()) == 0:
+        market_caps = {t: 1 for t in tickers}
 
     return market_caps
 
@@ -91,20 +100,19 @@ def fit_garch_single(return_series: pd.Series) -> dict:
     Fit GARCH(1,1) to a single asset.
     Returns forecasted daily sigma and standardized residuals.
     """
-    scaled = return_series * 100  # GARCH works better on percentage returns
+    scaled = return_series * 100
     model = arch_model(scaled, vol="Garch", p=1, q=1, dist="t", rescale=False)
     res = model.fit(disp="off", show_warning=False, options={'maxiter': 1000})
 
-    # 1-step ahead forecast
     forecast = res.forecast(horizon=1, reindex=False)
     sigma_next = float(np.sqrt(forecast.variance.iloc[-1, 0])) / 100
 
     cond_vol = res.conditional_volatility / 100
-    std_resid = res.std_resid  # ε_t = r_t / σ_t
+    std_resid = res.std_resid
 
     return {
         "model": res,
-        "sigma_forecast": sigma_next,         # daily σ for next period
+        "sigma_forecast": sigma_next,
         "cond_vol": cond_vol,
         "std_resid": std_resid,
         "params": res.params,
@@ -112,17 +120,15 @@ def fit_garch_single(return_series: pd.Series) -> dict:
 
 
 # ============================================================
-# SECTION 3: DCC-GARCH (Dynamic Conditional Correlation)
+# SECTION 3: DCC-GARCH
 # ============================================================
 
 def fit_dcc_garch(returns_df: pd.DataFrame) -> dict:
     """
     Two-stage DCC-GARCH:
-      Stage 1: Fit univariate GARCH(1,1) per asset → get σ_i(t) and ε_i(t)
-      Stage 2: Model time-varying correlation via DCC equations:
-                Q_t = (1-a-b)·Q̄ + a·ε_{t-1}ε'_{t-1} + b·Q_{t-1}
-                R_t = diag(Q_t)^{-½} · Q_t · diag(Q_t)^{-½}
-      Final:   H_t = D_t · R_t · D_t    (D_t = diag of GARCH σ's)
+      Stage 1 – univariate GARCH(1,1) per asset
+      Stage 2 – DCC correlation dynamics
+      Final   – annualised covariance H_t = D_t · R_t · D_t
     """
     tickers = returns_df.columns.tolist()
     n = len(tickers)
@@ -137,15 +143,14 @@ def fit_dcc_garch(returns_df: pd.DataFrame) -> dict:
         std_resids[ticker] = fit["std_resid"]
 
     std_resids = std_resids.dropna()
-    eps = std_resids.values  # shape: (T, n)
+    eps = std_resids.values
     T = len(eps)
 
-    # Q̄ = unconditional covariance of standardized residuals
     Q_bar = np.cov(eps.T)
-    if Q_bar.ndim == 0:  # single asset edge case
-        Q_bar = np.array([[Q_bar]])
+    if Q_bar.ndim == 0:
+        Q_bar = np.array([[float(Q_bar)]])
 
-    # --- Stage 2: Optimize DCC parameters (a, b) ---
+    # --- Stage 2: Optimize DCC parameters ---
     def dcc_neg_loglik(params):
         a, b = params
         if a <= 0 or b <= 0 or a + b >= 0.9999:
@@ -157,7 +162,6 @@ def fit_dcc_garch(returns_df: pd.DataFrame) -> dict:
             Q_t = (1 - a - b) * Q_bar + a * (e_lag @ e_lag.T) + b * Q_t
             d_inv = 1.0 / np.sqrt(np.diag(Q_t))
             R_t = Q_t * np.outer(d_inv, d_inv)
-            # Clamp diagonal for numerical stability
             np.fill_diagonal(R_t, 1.0)
             try:
                 sign, logdet = np.linalg.slogdet(R_t)
@@ -179,7 +183,7 @@ def fit_dcc_garch(returns_df: pd.DataFrame) -> dict:
     )
     a_hat, b_hat = opt.x
 
-    # --- Re-run DCC to get final R_T ---
+    # Re-run DCC to get final R_T
     Q_t = Q_bar.copy()
     for t in range(1, T):
         e_lag = eps[t - 1].reshape(-1, 1)
@@ -189,9 +193,7 @@ def fit_dcc_garch(returns_df: pd.DataFrame) -> dict:
     R_current = Q_t * np.outer(d_inv, d_inv)
     np.fill_diagonal(R_current, 1.0)
 
-    # --- Build annualized covariance matrix ---
     sigma_vec = np.array([garch_fits[t]["sigma_forecast"] for t in tickers])
-    # Daily cov → annualize by *252
     cov_daily = np.outer(sigma_vec, sigma_vec) * R_current
     cov_annual = cov_daily * 252
 
@@ -213,11 +215,8 @@ def fit_dcc_garch(returns_df: pd.DataFrame) -> dict:
 
 def detect_regimes(returns_df: pd.DataFrame, n_states: int = 3) -> dict:
     """
-    Fit a 3-state Gaussian HMM per asset using:
-      Features: [log_return, rolling_5d_vol]
-
-    States are labelled post-hoc by mean return:
-      Highest mean → Bull | Lowest mean → Bear | Middle → Sideways
+    Fit a 3-state Gaussian HMM per asset.
+    States labelled post-hoc: Bull / Sideways / Bear.
     """
     results = {}
 
@@ -238,7 +237,6 @@ def detect_regimes(returns_df: pd.DataFrame, n_states: int = 3) -> dict:
         hmm.fit(features)
         states_seq = hmm.predict(features)
 
-        # Label states by mean return and volatility
         state_mean_ret = {}
         state_vol = {}
         for s in range(3):
@@ -248,15 +246,11 @@ def detect_regimes(returns_df: pd.DataFrame, n_states: int = 3) -> dict:
 
         state_score = {}
         for s in range(3):
-            # normalize both metrics
-            ret_norm = (state_mean_ret[s] - np.mean(list(state_mean_ret.values())))
-            vol_norm = (state_vol[s] - np.mean(list(state_vol.values())))
-        
-            # higher return good, higher vol bad
+            ret_norm = state_mean_ret[s] - np.mean(list(state_mean_ret.values()))
+            vol_norm = state_vol[s] - np.mean(list(state_vol.values()))
             state_score[s] = ret_norm - vol_norm
 
         sorted_states = sorted(state_score.items(), key=lambda x: x[1])
-
         bear_state = sorted_states[0][0]
         side_state = sorted_states[1][0]
         bull_state = sorted_states[2][0]
@@ -264,7 +258,6 @@ def detect_regimes(returns_df: pd.DataFrame, n_states: int = 3) -> dict:
         label_map = {bear_state: "Bear", side_state: "Sideways", bull_state: "Bull"}
         current_label = label_map[states_seq[-1]]
 
-        # Transition probabilities from current state
         current_state_id = states_seq[-1]
         trans_probs = hmm.transmat_[current_state_id]
         trans_named = {label_map[i]: round(trans_probs[i], 3) for i in range(n_states)}
@@ -273,7 +266,7 @@ def detect_regimes(returns_df: pd.DataFrame, n_states: int = 3) -> dict:
             "regime": current_label,
             "regime_mean_daily": state_mean_ret[states_seq[-1]],
             "state_means": {label_map[s]: state_mean_ret[s] for s in range(n_states)},
-            "transition_probs": trans_named,  # probability of staying in / leaving regime
+            "transition_probs": trans_named,
             "history": [label_map[s] for s in states_seq],
         }
 
@@ -291,11 +284,9 @@ def estimate_expected_returns(
 ) -> dict:
     """
     Blend three signals into expected annual return per asset:
-      1. HMM regime-conditioned historical mean  (weight: 0.50)
-      2. 1M + 3M momentum signal                 (weight: 0.30)
-      3. User target return                       (weight: 0.20)
-
-    Also flags when model forecast strongly disagrees with user target.
+      1. HMM regime-conditioned historical mean  (weight: 0.60)
+      2. 1M + 3M momentum signal                 (weight: 0.40 or 0.20)
+      3. User target return                       (weight: 0.20, suppressed in Bear)
     """
     trading_days = 252
     exp_returns = {}
@@ -303,33 +294,26 @@ def estimate_expected_returns(
     for ticker in returns_df.columns:
         ret_series = returns_df[ticker]
 
-        # Signal 1: Regime-conditioned mean (annualized)
         regime_daily = regimes[ticker]["regime_mean_daily"]
         regime_annual = regime_daily * trading_days
-        # if regimes[ticker]["regime"] == "Bear":
-        #     regime_annual *= 1.5   # amplify negativity
-        # elif regimes[ticker]["regime"] == "Bull":
-        #     regime_annual *= 1.2
 
-        # Signal 2: Momentum (1-month and 3-month, equal blend)
         mom_1m = ret_series.tail(21).mean() * trading_days
         mom_3m = ret_series.tail(63).mean() * trading_days
         momentum_annual = 0.5 * mom_1m + 0.5 * mom_3m
 
-        # Signal 3: User target
         if regimes[ticker]["regime"] == "Bear":
-            user_weight = 0.0   # or even negative bias
+            user_weight = 0.0
         else:
             user_weight = 0.2
 
         model_annual = 0.6 * regime_annual + 0.4 * momentum_annual + user_weight * user_target_annual
 
-        # Divergence check: is model wildly different from user target?
         divergence_pct = abs(model_annual - user_target_annual) * 100
-        if divergence_pct > 15:
-            warning = f"⚠️  Model ({model_annual*100:.1f}%) vs User Target ({user_target_annual*100:.1f}%) diverge by {divergence_pct:.1f}pp"
-        else:
-            warning = None
+        warning = (
+            f"⚠️  Model ({model_annual*100:.1f}%) vs User Target ({user_target_annual*100:.1f}%)"
+            f" diverge by {divergence_pct:.1f}pp"
+            if divergence_pct > 15 else None
+        )
 
         exp_returns[ticker] = {
             "annual": model_annual,
@@ -351,36 +335,28 @@ def black_litterman_returns(
     market_caps: dict,
     cov_annual: np.ndarray,
     tickers: list,
-    views: dict,        # {ticker: expected_annual_return from our model}
-    tau: float = 0.5,  # uncertainty in prior (smaller = trust market more)
+    views: dict,
+    tau: float = 0.5,
     risk_aversion: float = 2.5,
 ) -> np.ndarray:
     """
-    Black-Litterman model:
-      Prior (π): Implied equilibrium returns from market-cap weights
-      Views (Q): Our model's expected returns per asset
-      Posterior (μ_BL): Blended estimate
-
-    BL Formula:
-      μ_BL = [(τΣ)^{-1} + P'Ω^{-1}P]^{-1} [(τΣ)^{-1}π + P'Ω^{-1}Q]
+    Black-Litterman posterior:
+      Prior  (π): implied equilibrium returns from market-cap weights
+      Views  (Q): model's expected returns per asset
+      Result (μ_BL): blended estimate
     """
     n = len(tickers)
-    market_caps = get_market_caps(tickers)
     total_mcap = sum(market_caps.values())
     w_mkt = np.array([market_caps[t] / total_mcap for t in tickers])
 
-    # Implied equilibrium returns: π = λ·Σ·w_mkt
     pi = risk_aversion * cov_annual @ w_mkt
 
-    # View matrix P: absolute views (one view per asset → P = I)
     P = np.eye(n)
     Q = np.array([views[t] for t in tickers])
 
-    # Uncertainty of views Ω = diag(τ · P·Σ·P')
     tau_sigma = tau * cov_annual
     omega = np.diag(np.diag(P @ tau_sigma @ P.T)) * 0.1
 
-    # BL posterior
     tau_sigma_inv = np.linalg.inv(tau_sigma)
     omega_inv = np.linalg.inv(omega)
 
@@ -398,81 +374,165 @@ def mean_variance_optimize(
     risk_appetite_monthly: float,
     allow_short: bool = False,
 ) -> dict:
-    n = len(tickers)
-    z_95 = norm.ppf(0.95)
+    """
+    Maximise regularised Sharpe ratio.
+
+    Design philosophy
+    -----------------
+    • No hard per-stock weight cap — allocation is driven purely by each
+      asset's risk/reward contribution.  A stock with 2× better Sharpe
+      naturally receives ~2× the weight.
+    • L2 regularisation (λ·‖w‖²) replaces hard caps.  It penalises
+      concentration smoothly, so weights spread proportionally rather
+      than hitting a wall at an arbitrary ceiling.
+    • No gross-exposure constraint — that was the direct cause of
+      cancelling pairs (e.g. +50% Reliance / -40% HDFC just to satisfy
+      Σ|w| ≤ 2 while meeting the equality constraint).
+    • For long/short mode the only short-side constraint is a cap on
+      *total* short exposure (≤ 40% of portfolio), so individual short
+      positions are still sized by risk/reward, not by a per-stock limit.
+
+    Constraints
+    -----------
+    Long-only : Σw = 1,  w_i ≥ 0
+    Long/short: Σw = 1,  w_i ≥ −1  (soft total-short cap via constraint)
+                         Σ min(w_i, 0) ≥ −MAX_TOTAL_SHORT
+    """
+    n              = len(tickers)
+    z_95           = norm.ppf(0.95)
     risk_free_rate = 0.07
-    
-    # Target annual variance based on monthly risk appetite
-    sigma_annual_max = (risk_appetite_monthly / z_95) * np.sqrt(12)
-    variance_max = sigma_annual_max ** 2
+    eq_w           = np.ones(n) / n
 
-    def objective(w):
-        ret = w @ mu
-        vol = np.sqrt(w @ cov_annual @ w)
-        excess = ret - 0.07
-        return -excess / vol if vol > 0 else 1e6
+    # ── Regularisation strength ──────────────────────────────────────────
+    # λ = 0.10 means the penalty equals ~10% of the Sharpe signal.
+    # Increase to spread weights more evenly; decrease to let the best
+    # stock dominate more aggressively.
+    LAMBDA = 0.10
 
-    def portfolio_variance(w):
-        return float(w @ cov_annual @ w)
-
-    constraints = [
-        {"type": "eq", "fun": lambda w: np.sum(w) - 1},
-        {"type": "ineq", "fun": lambda w: 2.0 - np.sum(np.abs(w))}
-    ]
+    # ── Short-side parameters (only used when allow_short=True) ──────────
+    MAX_TOTAL_SHORT = 0.40   # max 40% of portfolio in short positions in total
+    MAX_SHORT_SINGLE = -0.35 # no single position shorter than -35%
+    MAX_LONG_SINGLE  =  0.90 # single stock can go up to 90% if it earns it
 
     if allow_short:
-        # Bounds: -30% to 150% (allowing leverage/shorts)
-        bounds = [(-0.40, 1.20) for _ in range(n)]
+        bounds = [(MAX_SHORT_SINGLE, MAX_LONG_SINGLE) for _ in range(n)]
     else:
-        # Bounds: Long-only, max 60% in one stock
-        bounds = [(0.0, 0.60) for _ in range(n)]
+        bounds = [(0.0, 1.0) for _ in range(n)]   # fully open upward — L2 handles concentration
 
-    # Dynamic starting points based on n
-    starts = [
-        np.ones(n) / n,  # Equal weight
-        (mu == mu.max()).astype(float), # Concentrated in best performer
-    ]
+    # ── Objective: −Sharpe + λ·‖w‖² ─────────────────────────────────────
+    def objective(w):
+        ret    = w @ mu
+        vol    = np.sqrt(w @ cov_annual @ w)
+        sharpe = (ret - risk_free_rate) / vol if vol > 1e-9 else -1e6
+        penalty = LAMBDA * np.dot(w, w)
+        return -sharpe + penalty
 
+    # ── Constraints ──────────────────────────────────────────────────────
+    constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
+
+    if allow_short:
+        # Total short exposure must not exceed MAX_TOTAL_SHORT
+        # Σ min(w_i, 0) ≥ −MAX_TOTAL_SHORT  ↔  Σ min(w_i,0) + MAX_TOTAL_SHORT ≥ 0
+        constraints.append({
+            "type": "ineq",
+            "fun":  lambda w: MAX_TOTAL_SHORT + np.sum(np.minimum(w, 0.0))
+        })
+
+    # ── Starting points ──────────────────────────────────────────────────
+    rank = np.argsort(mu)   # rank[0] = worst BL return, rank[-1] = best
+
+    # 1. Equal weight
+    starts = [eq_w.copy()]
+
+    # 2. Risk-parity (inverse-vol weights) — good baseline
+    try:
+        inv_vol = 1.0 / np.sqrt(np.diag(cov_annual))
+        starts.append(inv_vol / inv_vol.sum())
+    except Exception:
+        pass
+
+    # 3. Return-proportional: weight ∝ max(μ_i, 0)  (long-only friendly)
+    mu_pos = np.maximum(mu, 0.0)
+    if mu_pos.sum() > 1e-9:
+        starts.append(mu_pos / mu_pos.sum())
+
+    # 4. Sharpe-proportional: weight ∝ μ_i / σ_i  (individual asset Sharpe)
+    try:
+        ind_sharpe = (mu - risk_free_rate) / np.sqrt(np.diag(cov_annual))
+        ind_sharpe_pos = np.maximum(ind_sharpe, 0.0)
+        if ind_sharpe_pos.sum() > 1e-9:
+            starts.append(ind_sharpe_pos / ind_sharpe_pos.sum())
+    except Exception:
+        pass
+
+    if allow_short and n >= 2:
+        # 5. 130/30 style: tilt best up, worst down proportionally
+        w_tilt = eq_w.copy()
+        tilt   = min(0.25, MAX_TOTAL_SHORT / max(n // 2, 1))
+        n_long  = max(n // 2, 1)
+        n_short = n - n_long
+        for i, idx in enumerate(rank[:n_short]):
+            w_tilt[idx] -= tilt / max(n_short, 1)
+        for i, idx in enumerate(rank[n_short:]):
+            w_tilt[idx] += tilt / max(n_long, 1)
+        starts.append(w_tilt)
+
+        # 6. Short only the single worst asset; long everything else
+        s = min(0.20, MAX_TOTAL_SHORT)
+        w_s = np.full(n, (1.0 + s) / (n - 1))
+        w_s[rank[0]] = -s
+        starts.append(w_s)
+
+    # ── Optimise from each start, keep the best ──────────────────────────
     best_result = None
     for w0 in starts:
+        w0 = np.array(w0, dtype=float)
+        w0 = np.clip(w0, [b[0] for b in bounds], [b[1] for b in bounds])
+        s  = w0.sum()
+        w0 = w0 / s if abs(s) > 1e-9 else eq_w
         res = minimize(
             objective, w0,
             method="SLSQP",
             bounds=bounds,
             constraints=constraints,
-            options={"ftol": 1e-10, "maxiter": 1000},
+            options={"ftol": 1e-10, "maxiter": 2000},
         )
-        if res.success:
-            if best_result is None or res.fun < best_result.fun:
-                best_result = res
+        if res.success and (best_result is None or res.fun < best_result.fun):
+            best_result = res
 
-    # FALLBACK: If the risk budget is impossible, find the Minimum Variance Portfolio
+    # Fallback: minimum-variance portfolio
     if best_result is None:
-        res_min_vol = minimize(
-            portfolio_variance, np.ones(n)/n,
+        res_mv = minimize(
+            lambda w: w @ cov_annual @ w,
+            eq_w,
             method="SLSQP",
             bounds=bounds,
-            constraints=[{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
+            constraints=[{"type": "eq", "fun": lambda w: np.sum(w) - 1}],
         )
-        weights = res_min_vol.x
+        weights = res_mv.x if res_mv.success else eq_w
     else:
         weights = best_result.x
 
-    # Post-process weights
-    weights[np.abs(weights) < 0.01] = 0    
-    weights /= weights.sum()
+    # ── Post-process ─────────────────────────────────────────────────────
+    # Strip genuine numerical noise only — keep any position that is
+    # intentionally small but meaningful (threshold: 0.2%)
+    noise_floor = 2e-3
+    weights[np.abs(weights) < noise_floor] = 0.0
+
+    total = weights.sum()
+    weights = weights / total if abs(total) > 1e-9 else eq_w
+
     port_ret = float(weights @ mu)
     port_vol = float(np.sqrt(weights @ cov_annual @ weights))
-
     excess_return = port_ret - risk_free_rate
-    
+
     return {
-        "weights": {tickers[i]: weights[i] for i in range(n)},
-        "weights_arr": weights,
-        "annual_return": port_ret,
-        "annual_vol": port_vol,
-        "monthly_vol": port_vol / np.sqrt(12),
-        "sharpe": excess_return / port_vol if port_vol > 0 else 0,
+        "weights":        {tickers[i]: float(weights[i]) for i in range(n)},
+        "weights_arr":    weights,
+        "annual_return":  port_ret,
+        "annual_vol":     port_vol,
+        "monthly_vol":    port_vol / np.sqrt(12),
+        "sharpe":         excess_return / port_vol if port_vol > 1e-9 else 0.0,
         "var_95_monthly": (port_vol / np.sqrt(12)) * z_95,
     }
 
@@ -490,32 +550,40 @@ def calculate_stop_losses(
 ) -> dict:
     """
     Individual stop loss:
-        stop = entry_price × (1 - k × σ_daily)
-    k is tightened for larger positions (more capital at risk).
-    Portfolio stop loss = capital × monthly_var_95
+      Long  position: stop = entry × (1 - k_adj × σ_daily)   [price falls]
+      Short position: stop = entry × (1 + k_adj × σ_daily)   [price rises]
+    k is tightened slightly for larger absolute positions.
     """
     stop_data = {}
 
     for ticker, weight in weights.items():
-        price = float(prices[ticker].iloc[-1])
-        sigma = sigma_forecasts[ticker]
-        allocation = weight * capital
-        shares = allocation / price if price > 0 else 0
+        price      = float(prices[ticker].iloc[-1])
+        sigma      = sigma_forecasts[ticker]
+        allocation = weight * capital          # negative for shorts
+        is_short   = weight < 0
+        shares     = allocation / price if price > 0 else 0   # negative for shorts
 
-        # Slightly tighter stop for larger weights
-        k_adj = k * (1.0 + 0.3 * weight)
-        stop_price = price * (1 - k_adj * sigma)
-        stop_pct   = k_adj * sigma * 100
-        risk_amt   = allocation * k_adj * sigma  # ₹ at risk per position
+        k_adj = k * (1.0 + 0.3 * abs(weight))
+
+        if is_short:
+            # Cover (buy back) if price rises above stop
+            stop_price = price * (1 + k_adj * sigma)
+        else:
+            # Sell if price falls below stop
+            stop_price = price * (1 - k_adj * sigma)
+
+        stop_pct = k_adj * sigma * 100
+        risk_amt = abs(allocation) * k_adj * sigma
 
         stop_data[ticker] = {
-            "entry_price": price,
-            "stop_price": stop_price,
-            "stop_pct": stop_pct,
-            "daily_sigma_pct": sigma * 100,
-            "weight_pct": weight * 100,
-            "allocation": allocation,
-            "shares": shares,
+            "entry_price":       price,
+            "stop_price":        stop_price,
+            "stop_pct":          stop_pct,      # always positive magnitude
+            "daily_sigma_pct":   sigma * 100,
+            "weight_pct":        weight * 100,
+            "allocation":        allocation,
+            "shares":            shares,
+            "is_short":          is_short,
             "risk_per_position": risk_amt,
         }
 
@@ -528,13 +596,10 @@ def calculate_stop_losses(
 
 def generate_dca_schedule(weights: dict, capital: float, months: int = 6) -> pd.DataFrame:
     """
-    Generate monthly DCA schedule with slight front-loading:
-    Months are weighted by a decay factor so early months deploy slightly more.
-    (Rationale: current regime signal is freshest now)
+    Monthly DCA with front-loading (current regime signal is freshest now).
     """
-    # Decay weights: month 1 gets most, last month gets least
     decay = np.array([1.0 / (1 + 0.1 * m) for m in range(months)])
-    decay /= decay.sum()  # normalize to sum=1
+    decay /= decay.sum()
 
     rows = []
     for month_idx, month_fraction in enumerate(decay, start=1):
@@ -557,7 +622,7 @@ def run_optimizer(
     user_target_annual: float,
     risk_appetite_monthly: float,
     allow_short: bool = False,
-    invest_mode: str = "lump_sum",  # "lump_sum" | "dca"
+    invest_mode: str = "lump_sum",
     dca_months: int = 6,
     stop_loss_k: float = 1.5,
 ):
@@ -567,61 +632,40 @@ def run_optimizer(
     print("  PORTFOLIO OPTIMIZER  |  GARCH + DCC + HMM + Black-Litterman")
     print(DIVIDER)
 
-    # ── Step 1: Data ──────────────────────────────────────────
+    # Step 1: Data
     print("\n[1/7] Fetching market data...")
     prices, returns = fetch_data(tickers)
 
+    # Reconcile: fetch_data may have dropped tickers with no data
+    tickers = returns.columns.tolist()
+
     market_caps = get_market_caps(tickers)
 
-    # ── Step 2: HMM Regimes ───────────────────────────────────
+    # Step 2: HMM Regimes
     print("\n[2/7] Detecting market regimes via HMM...")
     regimes = detect_regimes(returns)
     regime_table = []
     for t in tickers:
         r = regimes[t]
-        stay_prob = r["transition_probs"].get(r["regime"], "—")
+        stay_prob = r["transition_probs"].get(r["regime"], 0)
         regime_table.append([t, r["regime"], f"{stay_prob:.0%}", f"{r['regime_mean_daily']*100:.3f}%"])
     print(tabulate(regime_table, headers=["Stock", "Regime", "Stay Prob", "Regime Daily Mean"], tablefmt="rounded_outline"))
 
-    # ── Step 3: DCC-GARCH ─────────────────────────────────────
-    print("\n[3/7] Fitting DCC-GARCH (time-varying correlations + volatilities)...")
+    # Step 3: DCC-GARCH
+    print("\n[3/7] Fitting DCC-GARCH...")
     dcc = fit_dcc_garch(returns)
-    print(f"    DCC parameters → α (news shock): {dcc['dcc_a']:.4f}  |  β (persistence): {dcc['dcc_b']:.4f}")
+    print(f"    DCC α: {dcc['dcc_a']:.4f}  |  DCC β: {dcc['dcc_b']:.4f}")
 
-    vol_table = []
-    for t in tickers:
-        sig = dcc["sigma_forecasts"][t]
-        sig_annual = sig * np.sqrt(252)
-        vol_table.append([t, f"{sig*100:.2f}%", f"{sig_annual*100:.1f}%"])
-    print(tabulate(vol_table, headers=["Stock", "Daily σ (GARCH)", "Annual σ"], tablefmt="rounded_outline"))
-
-    print("\n    DCC Correlation Matrix:")
-    corr_df = pd.DataFrame(dcc["corr_matrix"], index=tickers, columns=tickers)
-    print(tabulate(corr_df.round(3), headers=tickers, tablefmt="rounded_outline", showindex=True))
-
-    # ── Step 4: Expected Returns ─────────────────────────────
-    print("\n[4/7] Estimating expected returns (Regime + Momentum + User Target)...")
+    # Step 4: Expected Returns
+    print("\n[4/7] Estimating expected returns...")
     exp_returns = estimate_expected_returns(returns, regimes, user_target_annual)
-
-    ret_table = []
-    for t in tickers:
-        er = exp_returns[t]
-        ret_table.append([
-            t,
-            f"{er['regime_signal']*100:.1f}%",
-            f"{er['momentum_signal']*100:.1f}%",
-            f"{er['user_target']*100:.1f}%",
-            f"{er['annual']*100:.1f}%",
-        ])
-    print(tabulate(ret_table, headers=["Stock", "Regime Signal", "Momentum", "User Target", "Model Blended"], tablefmt="rounded_outline"))
-
     for t in tickers:
         w = exp_returns[t]["divergence_warning"]
         if w:
             print(f"    {w}")
 
-    # ── Step 5: Black-Litterman ───────────────────────────────
-    print("\n[5/7] Applying Black-Litterman to blend market prior with model views...")
+    # Step 5: Black-Litterman
+    print("\n[5/7] Applying Black-Litterman...")
     views = {t: exp_returns[t]["annual"] for t in tickers}
     mu_bl = black_litterman_returns(
         market_caps=market_caps,
@@ -629,14 +673,9 @@ def run_optimizer(
         tickers=tickers,
         views=views,
     )
-    bl_table = [[tickers[i], f"{views[tickers[i]]*100:.1f}%", f"{mu_bl[i]*100:.1f}%"] for i in range(len(tickers))]
-    print(tabulate(bl_table, headers=["Stock", "Raw Model View", "BL Posterior Return"], tablefmt="rounded_outline"))
 
-    # ── Step 6: MVO ───────────────────────────────────────────
-    print("\n[6/7] Running Mean-Variance Optimization (CVaR-constrained)...")
-    print(f"    Risk appetite: max {risk_appetite_monthly*100:.1f}% monthly loss (95% confidence)")
-    print(f"    Short selling: {'Allowed (max 30% per stock)' if allow_short else 'Not allowed'}")
-
+    # Step 6: MVO
+    print("\n[6/7] Running Mean-Variance Optimization (max 50% per stock)...")
     mvo = mean_variance_optimize(
         mu=mu_bl,
         cov_annual=dcc["cov_annual"],
@@ -645,123 +684,49 @@ def run_optimizer(
         allow_short=allow_short,
     )
 
-    print(f"\n    ✅ Portfolio Expected Return : {mvo['annual_return']*100:.2f}% p.a.")
-    print(f"    ✅ Portfolio Volatility       : {mvo['annual_vol']*100:.2f}% p.a.")
-    print(f"    ✅ Sharpe Ratio               : {mvo['sharpe']:.2f}")
-    print(f"    ✅ Monthly VaR (95%)          : {mvo['var_95_monthly']*100:.2f}%")
-
-    # ── Step 7: Stop Losses + Final Allocations ───────────────
-    print("\n[7/7] Computing allocations and GARCH-based stop losses...")
+    # Step 7: Stop Losses
+    print("\n[7/7] Computing stop losses...")
     stop_data = calculate_stop_losses(
         prices, dcc["sigma_forecasts"], mvo["weights"], capital, stop_loss_k
     )
 
-    # ── Final Output ──────────────────────────────────────────
-    print(f"\n{DIVIDER}")
-    print("  FINAL ALLOCATION SUMMARY")
-    print(DIVIDER)
-    print(f"\n  Total Capital      : ₹{capital:>12,.2f}")
-    print(f"  Investment Mode    : {'Dollar-Cost Averaging over ' + str(dca_months) + ' months' if invest_mode == 'dca' else 'Lump Sum'}")
-    print(f"  User Target Return : {user_target_annual*100:.1f}% p.a.")
-    print(f"  Risk Appetite      : {risk_appetite_monthly*100:.1f}% max monthly loss")
-
-    alloc_table = []
-    for t in tickers:
-        sd = stop_data[t]
-        alloc_table.append([
-            t,
-            f"₹{sd['entry_price']:>8,.2f}",
-            f"{sd['weight_pct']:.1f}%",
-            f"₹{sd['allocation']:>10,.2f}",
-            f"{sd['shares']:.2f}",
-            f"₹{sd['risk_per_position']:>8,.2f}",
-        ])
-    print()
-    print(tabulate(alloc_table,
-        headers=["Stock", "Entry Price", "Weight", "Allocation", "Shares", "Capital at Risk"],
-        tablefmt="rounded_outline"))
-
-    stop_table = []
-    for t in tickers:
-        sd = stop_data[t]
-        stop_table.append([
-            t,
-            f"₹{sd['entry_price']:>8,.2f}",
-            f"₹{sd['stop_price']:>8,.2f}",
-            f"{sd['stop_pct']:.2f}%",
-            f"{sd['daily_sigma_pct']:.2f}%",
-            regimes[t]["regime"],
-        ])
-    print()
-    print(tabulate(stop_table,
-        headers=["Stock", "Entry", "Stop Loss", "Stop %", "Daily σ", "Regime"],
-        tablefmt="rounded_outline"))
-
-    # Portfolio-level stop loss
-    total_risk = sum(sd["risk_per_position"] for sd in stop_data.values())
-    portfolio_stop_pct = mvo["var_95_monthly"] * 100
-    print(f"\n  📌 Portfolio Stop Loss (monthly VaR 95%) : {portfolio_stop_pct:.2f}%  →  ₹{capital * mvo['var_95_monthly']:,.2f}")
-    print(f"  📌 Total ₹ at Risk (individual stops)   : ₹{total_risk:,.2f}")
-
-    # ── DCA Schedule ─────────────────────────────────────────
+    # DCA Schedule
+    dca_df = None
     if invest_mode == "dca":
-        print(f"\n{DIVIDER}")
-        print(f"  DCA DEPLOYMENT SCHEDULE  ({dca_months} months, front-loaded)")
-        print(DIVIDER)
         dca_df = generate_dca_schedule(mvo["weights"], capital, dca_months)
-        print()
-        print(tabulate(dca_df, headers=dca_df.columns, tablefmt="rounded_outline", showindex=False, floatfmt=",.2f"))
-        print("\n  Note: Front-loading applies because current regime signals are freshest.")
-        print("  Rebalance immediately if HMM detects a regime change mid-schedule.")
-
-    # ── Regime Change Warning ─────────────────────────────────
-    print(f"\n{DIVIDER}")
-    print("  REGIME TRANSITION RISK")
-    print(DIVIDER)
-    for t in tickers:
-        r = regimes[t]
-        print(f"\n  {t} — Currently: {r['regime']}")
-        for target_regime, prob in r["transition_probs"].items():
-            bar = "█" * int(prob * 20)
-            print(f"    → {target_regime:<10} {prob:.1%}  {bar}")
-
-    print(f"\n  ⚡ Trigger a full rebalance if any stock's HMM regime shifts.")
-    print(f"  ⚡ Re-run DCC-GARCH monthly to update correlations and stop losses.")
 
     print(f"\n{'='*65}\n")
 
     return {
-        "weights": mvo["weights"],
-        "stop_data": stop_data,
-        "regimes": regimes,
+        "weights":           mvo["weights"],
+        "stop_data":         stop_data,
+        "regimes":           regimes,
+        "dca_df":            dca_df,
         "portfolio_metrics": {
-            "annual_return": mvo["annual_return"],
-            "annual_vol": mvo["annual_vol"],
-            "sharpe": mvo["sharpe"],
+            "annual_return":  mvo["annual_return"],
+            "annual_vol":     mvo["annual_vol"],
+            "sharpe":         mvo["sharpe"],
             "monthly_var_95": mvo["var_95_monthly"],
         },
-        "dcc": dcc,
+        "dcc":        dcc,
         "bl_returns": {tickers[i]: mu_bl[i] for i in range(len(tickers))},
+        "exp_returns": exp_returns,
     }
 
 
 # ============================================================
-# ENTRY POINT — configure and run here
+# ENTRY POINT
 # ============================================================
 
 if __name__ == "__main__":
-
-    # ── User Inputs ────────────────────────────────────────────
-    TICKERS = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"]
-
-    CAPITAL               = 1_000_000   # ₹10 Lakhs
-    USER_TARGET_ANNUAL    = 0.18        # 18% target return per year
-    RISK_APPETITE_MONTHLY = 0.05        # Willing to lose max 5% per month (95% VaR)
-    ALLOW_SHORT           = False       # Set True to allow short positions
-    INVEST_MODE           = "dca"       # "lump_sum" or "dca"
-    DCA_MONTHS            = 6           # Relevant only if INVEST_MODE = "dca"
-    STOP_LOSS_K           = 1.5         # Stop = entry × (1 - k × σ_daily), k=1.5 → ~1.5σ stop
-
+    TICKERS               = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"]
+    CAPITAL               = 1_000_000
+    USER_TARGET_ANNUAL    = 0.18
+    RISK_APPETITE_MONTHLY = 0.05
+    ALLOW_SHORT           = False
+    INVEST_MODE           = "dca"
+    DCA_MONTHS            = 6
+    STOP_LOSS_K           = 1.5
 
     results = run_optimizer(
         tickers=TICKERS,
@@ -771,5 +736,5 @@ if __name__ == "__main__":
         allow_short=ALLOW_SHORT,
         invest_mode=INVEST_MODE,
         dca_months=DCA_MONTHS,
-        stop_loss_k=STOP_LOSS_K
+        stop_loss_k=STOP_LOSS_K,
     )
