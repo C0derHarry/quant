@@ -264,13 +264,16 @@ def run_pos_sizing():
     # ── ② Portfolio Metrics ───────────────────────────────────
     st.markdown('<div class="section-header">② Portfolio Metrics</div>', unsafe_allow_html=True)
 
-    pm1, pm2, pm3, pm4 = st.columns(4)
+    pm1, pm2, pm3, pm4, pm5 = st.columns(5)
+    t_df  = port_metrics.get("t_df", 5.0)
     cards = [
-        (pm1, "Expected Return",    f"{port_metrics['annual_return']*100:.2f}%", "p.a."),
-        (pm2, "Volatility",         f"{port_metrics['annual_vol']*100:.2f}%",    "p.a."),
-        (pm3, "Sharpe Ratio",       f"{port_metrics['sharpe']:.2f}",             "rf = 7%"),
-        (pm4, "Monthly VaR (95%)",  f"{port_metrics['monthly_var_95']*100:.2f}%",
-         f"₹{capital_used * port_metrics['monthly_var_95']:,.0f}"),
+        (pm1, "Expected Return",      f"{port_metrics['annual_return']*100:.2f}%",  "p.a."),
+        (pm2, "Volatility",           f"{port_metrics['annual_vol']*100:.2f}%",     "p.a."),
+        (pm3, "Sharpe Ratio",         f"{port_metrics['sharpe']:.2f}",              "rf = 7%"),
+        (pm4, "MC VaR (95%, 1mo)",    f"{abs(port_metrics['mc_var'])*100:.2f}%",
+         f"t-dist df={t_df:.1f}"),
+        (pm5, "MC CVaR (95%, 1mo)",   f"{abs(port_metrics['mc_cvar'])*100:.2f}%",
+         f"Rs{capital_used * abs(port_metrics['mc_cvar']):,.0f}"),
     ]
     for col, label, value, delta in cards:
         with col:
@@ -339,7 +342,7 @@ def run_pos_sizing():
             return styles
 
         styled = df_alloc.style.apply(colour_cells, axis=1)
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+        st.dataframe(styled, width='stretch', hide_index=True)
 
         # Portfolio-level risk summary
         total_risk = sum(stop_data[t]["risk_per_position"] for t in params["tickers"])
@@ -373,22 +376,28 @@ def run_pos_sizing():
 
     with chart_col:
         fig_w = plot_weight_bar(weights)
-        st.pyplot(fig_w, use_container_width=True)
+        st.pyplot(fig_w, width='stretch')
         plt.close(fig_w)
 
-        # Compact regime summary
+        # Compact regime summary with smoothed probabilities
         st.markdown("**Current Regimes**")
         regime_cols = st.columns(len(params["tickers"]))
         for i, ticker in enumerate(params["tickers"]):
-            r = regimes[ticker]
-            current = r["regime"]
-            stay_p  = r["transition_probs"].get(current, 0)
+            r        = regimes[ticker]
+            current  = r["regime"]
+            stay_p   = r["transition_probs"].get(current, 0)
+            smooth_p = r.get("regime_probs", {}).get(current, stay_p)
             with regime_cols[i]:
+                prob_lines = "<br>".join(
+                    f'<span style="color:{REGIME_COLOR.get(k, "#a0aec0")};font-size:10px;">'
+                    f'{k}: {v:.0%}</span>'
+                    for k, v in r.get("regime_probs", {}).items()
+                )
                 st.markdown(
                     f'<div class="metric-card" style="padding:10px 14px;">'
                     f'<div class="metric-label">{ticker}</div>'
                     f'<div style="margin:4px 0;">{_regime_pill(current)}</div>'
-                    f'<div class="metric-delta">Stay: {stay_p:.0%}</div>'
+                    f'<div style="margin-top:4px;">{prob_lines}</div>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -407,15 +416,15 @@ def run_pos_sizing():
 
         with dca_col:
             dca_display = dca_df.copy()
-            dca_display["Deploy (₹)"] = dca_display["Deploy (₹)"].map(lambda x: f"₹{x:,.0f}")
+            dca_display["Deploy (₹)"] = dca_display["Deploy (Rs)"].map(lambda x: f"₹{x:,.0f}")
             for t in params["tickers"]:
                 if t in dca_display.columns:
                     dca_display[t] = dca_display[t].map(lambda x: f"₹{x:,.0f}")
-            st.dataframe(dca_display, use_container_width=True, hide_index=True)
+            st.dataframe(dca_display, width='stretch', hide_index=True)
 
         with dca_chart_col:
             fig_dca = plot_dca_schedule(dca_df)
-            st.pyplot(fig_dca, use_container_width=True)
+            st.pyplot(fig_dca, width='stretch')
             plt.close(fig_dca)
 
         st.markdown(
