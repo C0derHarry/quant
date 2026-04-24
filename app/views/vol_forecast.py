@@ -9,6 +9,8 @@ Integrates: GARCH model selection + EWMA diagnostics
 import warnings
 warnings.filterwarnings("ignore")
 
+import sys
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -17,14 +19,11 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from arch import arch_model
 from statsmodels.tsa.stattools import pacf
-from scipy.optimize import minimize_scalar
 from scipy.stats import norm
 
-# ── Page config ───────────────────────────────────────────────
-st.set_page_config(
-    page_title="Volatility Forecasting",
-    page_icon="📈",
-    layout="wide",
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from core.volatility.ewma import (
+    ewma_variance, ewma_volatility, get_optimal_lambda, half_life, decay_table
 )
 
 # ── Styling ───────────────────────────────────────────────────
@@ -225,58 +224,6 @@ def model_predict(returns: pd.Series, best_p: int, best_q: int,
     }).set_index("Day")
     return df, fitted
 
-
-# ═══════════════════════════════════════════════════════════════
-# CORE FUNCTIONS — EWMA
-# ═══════════════════════════════════════════════════════════════
-
-def ewma_variance(returns: pd.Series, lambda_: float = 0.94) -> pd.Series:
-    r = returns.values.astype(float)
-    n = len(r)
-    var = np.empty(n)
-    warmup = min(21, n)
-    var[0] = np.var(r[:warmup], ddof=1)
-    alpha = 1.0 - lambda_
-    for t in range(1, n):
-        var[t] = lambda_ * var[t - 1] + alpha * r[t] ** 2
-    return pd.Series(var, index=returns.index)
-
-
-def ewma_volatility(returns: pd.Series, lambda_: float = 0.94,
-                    annualise: bool = True) -> pd.Series:
-    vol = np.sqrt(ewma_variance(returns, lambda_))
-    if annualise:
-        vol *= np.sqrt(252)
-    return vol
-
-
-def get_optimal_lambda(returns: pd.Series) -> float:
-    def nll(lam):
-        T = len(returns)
-        variances = np.zeros(T)
-        variances[0] = np.var(returns.values)
-        for t in range(1, T):
-            variances[t] = lam * variances[t-1] + (1 - lam) * (returns.iloc[t-1] ** 2)
-        return 0.5 * np.sum(np.log(variances + 1e-10) + (returns.values ** 2) / (variances + 1e-10))
-
-    res = minimize_scalar(nll, bounds=(0.85, 0.99), method='bounded')
-    return float(res.x)
-
-
-def half_life(lambda_: float) -> float:
-    return np.log(0.5) / np.log(lambda_)
-
-
-def decay_table(lambdas=None) -> pd.DataFrame:
-    if lambdas is None:
-        lambdas = np.round(np.arange(0.90, 1.00, 0.01), 2).tolist()
-    rows = []
-    for lam in lambdas:
-        hl = half_life(lam)
-        eff = np.log(0.05) / np.log(lam)
-        rows.append({"λ": lam, "Half-life (days)": round(hl, 1),
-                     "95%-weight window (days)": round(eff, 0)})
-    return pd.DataFrame(rows).set_index("λ")
 
 
 # ═══════════════════════════════════════════════════════════════

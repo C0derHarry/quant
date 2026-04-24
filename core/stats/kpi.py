@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import statsmodels.api as sm
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
 ## Compounded Annual Growth Rate (CAGR)
@@ -85,7 +86,7 @@ def rolling_sharpe(df, timeframe, window, column='Close', is_price=True):
 
 def Sortino(df, timeframe, rfr=0.07):
     df = df.copy()
-    cagr = CAGR(df)
+    cagr = CAGR(df, timeframe)
     df['return'] = df['Close'].pct_change()
     negative_return = np.where(df['return'] > 0,0,df['return'])
     negative_volume = pd.Series(negative_return[negative_return != 0]).std() * np.sqrt(timeframe)
