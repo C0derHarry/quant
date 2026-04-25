@@ -1,4 +1,4 @@
-# Virtual Environments
+# Virtual environments
 venv/
 .venv/
 env/
@@ -7,18 +7,48 @@ lib/
 share/
 
 # Python cache and compiled files
-**/__pycache__/
+__pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Distribution / packaging
 dist/
 build/
 *.egg-info/
+*.egg
 
 # Environment variables (security)
 .env
+.env.local
+.env.*.local
 
-# IDE specific (VSCode/PyCharm)
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Large / generated data files
+*.csv
+*.parquet
+*.feather

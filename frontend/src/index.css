@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Base reset ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+:root { color-scheme: dark; }
+
+html { font-size: 13px; }
+
+body {
+  margin: 0;
+  background-color: #07090D;
+  color: #E6EDF3;
+  font-family: 'Inter', system-ui, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #30363D; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #484F58; }
+
+/* ─── Selection ──────────────────────────────────────────── */
+::selection { background: rgba(56,139,253,.28); color: #E6EDF3; }
+
+/* ─── Numeric formatting ─────────────────────────────────── */
+.num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+
+/* ─── Focus ring ─────────────────────────────────────────── */
+:focus-visible { outline: 2px solid rgba(56,139,253,.6); outline-offset: 2px; border-radius: 4px; }
+
+/* ─── Recharts dark overrides ────────────────────────────── */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line   { stroke: #1C2128; }
+.recharts-xAxis .recharts-cartesian-axis-tick-value,
+.recharts-yAxis .recharts-cartesian-axis-tick-value {
+  fill: #6E7681;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.recharts-tooltip-wrapper { outline: none; }
+
+/* ─── Radix overrides ────────────────────────────────────── */
+[data-radix-popper-content-wrapper] { z-index: 50 !important; }
+
+/* ─── Page transition ────────────────────────────────────── */
+.page-enter { animation: fadeUp .22s ease-out; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Table row hover ────────────────────────────────────── */
+.tbl-row:hover td { background: #1C2128; }
