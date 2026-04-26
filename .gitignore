@@ -52,3 +52,7 @@ frontend/.vite/
 *.csv
 *.parquet
 *.feather
+
+# ML model cache
+*.joblib
+api/signal_cache/
