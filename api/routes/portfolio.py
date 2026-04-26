@@ -16,6 +16,7 @@ class OptimizeRequest(BaseModel):
     invest_mode:          str   = "lump_sum"
     dca_months:           int   = 6
     stop_loss_k:          float = 1.5
+    use_ml_signals:       bool  = False
 
 
 def _safe(v):
@@ -38,10 +39,57 @@ def _safe(v):
     return v
 
 
+def _build_ml_views(tickers_ns: list[str]) -> dict:
+    """Fetch cached ML model or train fresh; return {ticker_ns: p_up}."""
+    import os, joblib, yfinance as yf
+    from datetime import date
+    from core.signals.ml_signals import MLSignalModel
+
+    cache_dir = os.path.join(os.path.dirname(__file__), "..", "signal_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    views = {}
+
+    for ticker_ns in tickers_ns:
+        if ticker_ns.startswith("^"):
+            continue
+        tag  = ticker_ns.replace(".", "_")
+        path = os.path.join(cache_dir, f"{tag}_{date.today().isoformat()}.joblib")
+        try:
+            df = yf.download(ticker_ns, period="2y", auto_adjust=True, progress=False)
+            if df.empty:
+                continue
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+
+            if os.path.exists(path):
+                model = joblib.load(path)
+            else:
+                model = MLSignalModel()
+                model.fit(df, verbose=False)
+                try:
+                    joblib.dump(model, path)
+                except Exception:
+                    pass
+
+            views[ticker_ns] = model.latest_signal(df)["p_up"]
+        except Exception as e:
+            print(f"ml_views error for {ticker_ns}: {e}")
+
+    return views
+
+
 @router.post("/optimize")
 def optimize(req: OptimizeRequest):
     try:
         tickers = [t if t.startswith("^") or "." in t else f"{t}.NS" for t in req.tickers]
+
+        ml_views = None
+        if req.use_ml_signals:
+            try:
+                ml_views = _build_ml_views(tickers)
+            except Exception as e:
+                print(f"ML views failed, proceeding without: {e}")
+
         raw = run_optimizer(
             tickers               = tickers,
             capital               = req.capital,
@@ -51,6 +99,7 @@ def optimize(req: OptimizeRequest):
             invest_mode           = req.invest_mode,
             dca_months            = req.dca_months,
             stop_loss_k           = req.stop_loss_k,
+            ml_views              = ml_views,
         )
 
         # Build stop loss table
@@ -114,6 +163,7 @@ def optimize(req: OptimizeRequest):
             "dca_schedule":  dca_rows,
             "dcc_a":         round(float(raw["dcc"]["dcc_a"]), 4),
             "dcc_b":         round(float(raw["dcc"]["dcc_b"]), 4),
+            "ml_adjusted":   ml_views is not None and len(ml_views) > 0,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

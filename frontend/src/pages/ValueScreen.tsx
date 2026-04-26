@@ -1,13 +1,11 @@
-import { useState, useCallback } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { getAllSymbols, runMagicFormula, runQARP } from '../lib/api'
-import { PageLoader, ErrorState } from '../components/ui/Spinner'
+import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { runMagicFormula, runQARP } from '../lib/api'
 import Spinner from '../components/ui/Spinner'
 import DataTable, { Column } from '../components/ui/DataTable'
-import { Search, X, Plus, CheckCircle2, Wand2, Sparkles } from 'lucide-react'
+import StockBrowser from '../components/ui/StockBrowser'
+import { X, Wand2, Sparkles, AlertTriangle } from 'lucide-react'
 import { cn } from '../lib/utils'
-
-const PAGE = 15
 
 function ScoreBar({ rank, total }: { rank: number; total: number }) {
   const pct = Math.round((1 - rank / total) * 100)
@@ -24,18 +22,26 @@ function ScoreBar({ rank, total }: { rank: number; total: number }) {
   )
 }
 
+type Verdict = 'BUY' | 'WATCH' | 'AVOID'
+
+function VerdictBadge({ v }: { v: Verdict }) {
+  const cfg: Record<Verdict, { label: string; cls: string }> = {
+    BUY:   { label: 'Buy',   cls: 'bg-[rgba(63,185,80,.12)] text-gain border-[rgba(63,185,80,.3)]' },
+    WATCH: { label: 'Watch', cls: 'bg-[rgba(210,153,34,.12)] text-warn border-[rgba(210,153,34,.3)]' },
+    AVOID: { label: 'Avoid', cls: 'bg-[rgba(248,81,73,.12)] text-loss border-[rgba(248,81,73,.3)]' },
+  }
+  const { label, cls } = cfg[v] ?? cfg.AVOID
+  return (
+    <span className={cn('inline-block rounded border px-2 py-0.5 text-xs font-semibold', cls)}>
+      {label}
+    </span>
+  )
+}
+
 export default function ValueScreen() {
-  const [search, setSearch]     = useState('')
-  const [page, setPage]         = useState(0)
   const [selected, setSelected] = useState<string[]>([])
   const [screener, setScreener] = useState<'magic' | 'qarp'>('magic')
   const [results, setResults]   = useState<Record<string, unknown>[] | null>(null)
-
-  const { data: symbols, isLoading, error } = useQuery({
-    queryKey: ['symbols'],
-    queryFn:  () => getAllSymbols('NSE'),
-    staleTime: Infinity,
-  })
 
   const magicMut = useMutation({
     mutationFn: () => runMagicFormula(selected),
@@ -45,12 +51,6 @@ export default function ValueScreen() {
     mutationFn: () => runQARP(selected),
     onSuccess:  d => setResults(d.results),
   })
-
-  const filtered = (symbols ?? []).filter(s =>
-    search ? s.symbol.includes(search.toUpperCase()) || s.name.toUpperCase().includes(search.toUpperCase()) : true
-  )
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE))
-  const pageItems  = filtered.slice(page * PAGE, (page + 1) * PAGE)
 
   function toggle(sym: string) {
     setSelected(prev =>
@@ -62,95 +62,52 @@ export default function ValueScreen() {
   const running = magicMut.isPending || qarpMut.isPending
 
   const resultCols = results && results.length > 0
-    ? Object.keys(results[0]).map<Column<Record<string, unknown>>>(k => ({
-        key:    k,
-        header: k.replace(/_/g, ' '),
-        cell:   r => {
-          const v = r[k]
-          if (typeof v === 'number') {
-            return <span className="num font-mono text-ink-primary">{Number(v).toFixed(2)}</span>
+    ? Object.keys(results[0]).map<Column<Record<string, unknown>>>(k => {
+        if (k === 'Verdict') {
+          return {
+            key: k, header: 'Verdict', align: 'center',
+            cell: r => <VerdictBadge v={String(r[k]) as Verdict} />,
+            sort: r => ({ BUY: 0, WATCH: 1, AVOID: 2 }[String(r[k])] ?? 3),
           }
-          return <span className="text-ink-primary">{String(v)}</span>
-        },
-        sort: r => typeof r[k] === 'number' ? Number(r[k]) : String(r[k]),
-        align: typeof results[0][k] === 'number' ? 'right' : 'left',
-      }))
+        }
+        return {
+          key:    k,
+          header: k.replace(/_/g, ' '),
+          cell:   r => {
+            const v = r[k]
+            if (typeof v === 'number') {
+              return <span className="num font-mono text-ink-primary">{Number(v).toFixed(2)}</span>
+            }
+            return <span className="text-ink-primary">{String(v)}</span>
+          },
+          sort: r => typeof r[k] === 'number' ? Number(r[k]) : String(r[k]),
+          align: typeof results[0][k] === 'number' ? 'right' : 'left',
+        }
+      })
     : []
-
-  if (isLoading) return <PageLoader label="Loading symbols…" />
-  if (error)     return <ErrorState message={error.message} />
 
   return (
     <div className="flex h-[calc(100vh-104px)] gap-5 animate-fade-up">
       {/* Left: Stock browser */}
-      <div className="flex w-[340px] shrink-0 flex-col rounded-md border border-border bg-bg-surface shadow-card">
-        <div className="border-b border-border p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-ink-secondary">
-            NSE Universe
-          </h3>
-          <div className="relative">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
-            <input
-              type="text"
-              placeholder="Search symbol or name…"
-              value={search}
-              onChange={e => { setSearch(e.target.value); setPage(0) }}
-              className="w-full rounded border border-border bg-bg-elevated py-1.5 pl-8 pr-3 text-sm text-ink-primary placeholder:text-ink-disabled focus:border-accent focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {pageItems.map(s => {
-            const sel = selected.includes(s.symbol)
-            return (
-              <button
-                key={s.symbol}
-                onClick={() => toggle(s.symbol)}
-                className={cn(
-                  'flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors',
-                  'border-b border-border/40 last:border-0',
-                  sel ? 'bg-[rgba(56,139,253,.06)]' : 'hover:bg-bg-elevated',
-                )}
-              >
-                <div>
-                  <p className={cn('font-mono text-sm font-semibold', sel ? 'text-accent' : 'text-ink-primary')}>
-                    {s.symbol}
-                  </p>
-                  <p className="mt-0.5 max-w-[200px] truncate text-xs text-ink-muted">{s.name}</p>
-                </div>
-                {sel
-                  ? <CheckCircle2 size={15} className="shrink-0 text-accent" />
-                  : <Plus size={15} className="shrink-0 text-ink-disabled" />
-                }
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
-          <button
-            onClick={() => setPage(p => Math.max(0, p - 1))}
-            disabled={page === 0}
-            className="text-xs text-ink-secondary hover:text-ink-primary disabled:text-ink-disabled"
-          >
-            ← Prev
-          </button>
-          <span className="text-xs text-ink-muted">
-            {page + 1} / {totalPages}
-          </span>
-          <button
-            onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
-            disabled={page >= totalPages - 1}
-            className="text-xs text-ink-secondary hover:text-ink-primary disabled:text-ink-disabled"
-          >
-            Next →
-          </button>
-        </div>
-      </div>
+      <StockBrowser
+        className="w-[340px] shrink-0"
+        selected={selected}
+        onToggle={toggle}
+      />
 
       {/* Right: Selected + results */}
       <div className="flex flex-1 flex-col gap-4 overflow-hidden">
+
+        {/* Banking disclaimer */}
+        <div className="flex items-start gap-2.5 rounded-md border border-[rgba(210,153,34,.3)] bg-[rgba(210,153,34,.06)] px-4 py-3">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" />
+          <p className="text-xs leading-relaxed text-warn/90">
+            <span className="font-semibold">Banking &amp; NBFC stocks are not suitable for these screeners.</span>{' '}
+            Banks maintain their balance sheets differently — EBIT, Net PPE, and Working Capital metrics are not meaningful for them.
+            Results for banking stocks will be misleading. Stick to non-financial sectors.
+          </p>
+        </div>
+
         {/* Selected chips */}
         <div className="rounded-md border border-border bg-bg-surface p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -222,6 +179,16 @@ export default function ValueScreen() {
           </button>
         </div>
 
+        {/* QARP criteria legend */}
+        {screener === 'qarp' && (
+          <div className="flex flex-wrap items-center gap-4 rounded-md border border-border bg-bg-surface px-4 py-3 text-xs text-ink-muted">
+            <span className="font-semibold text-ink-secondary">Verdict criteria:</span>
+            <span><span className="font-semibold text-gain">Buy</span> — ROE &gt; 20%, D/E &lt; 0.5, Forward P/E &lt; 15 (all three met)</span>
+            <span><span className="font-semibold text-warn">Watch</span> — two of three criteria met</span>
+            <span><span className="font-semibold text-loss">Avoid</span> — fewer than two criteria met</span>
+          </div>
+        )}
+
         {/* Results */}
         <div className="flex-1 overflow-auto rounded-md border border-border bg-bg-surface shadow-card">
           {!results && !running && (
@@ -240,7 +207,7 @@ export default function ValueScreen() {
           {results && (
             <div className="p-4">
               <p className="mb-3 text-xs text-ink-muted">
-                {results.length} results — {screener === 'magic' ? 'ranked by Earnings Yield + ROC' : 'filtered by ROE, D/E, P/E'}
+                {results.length} results — {screener === 'magic' ? 'ranked by Earnings Yield + ROC' : 'ROE, D/E & P/E screened'}
               </p>
               <DataTable
                 columns={resultCols}

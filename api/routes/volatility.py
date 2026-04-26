@@ -26,14 +26,24 @@ class ForecastRequest(BaseModel):
     horizon: int  = 5
 
 
+def _normalize(ticker: str) -> str:
+    if ticker.endswith((".NS", ".BO")):
+        return ticker
+    return ticker + ".NS"
+
 def _fetch_returns(tickers: list[str], period: str):
-    raw = yf.download(tickers, period=period, auto_adjust=True, progress=False)["Close"]
+    yf_tickers = [_normalize(t) for t in tickers]
+    raw = yf.download(yf_tickers, period=period, auto_adjust=True, progress=False)["Close"]
     if isinstance(raw, pd.Series):
-        raw = raw.to_frame(tickers[0])
+        raw = raw.to_frame(yf_tickers[0])
+    raw.columns = [c.replace(".NS", "").replace(".BO", "") for c in raw.columns]
     raw = raw.dropna(how="all").ffill(limit=5).dropna()
+    if raw.empty:
+        raise ValueError(f"No price data returned for {tickers} over period '{period}'")
     log_ret = np.log(raw / raw.shift(1)).dropna()
+    bare = tickers[0].replace(".NS", "").replace(".BO", "")
     if len(tickers) == 1:
-        return log_ret[tickers[0]], raw
+        return log_ret[bare], raw
     port_ret = log_ret.mean(axis=1)
     port_ret.name = "Portfolio"
     return port_ret, raw
@@ -51,7 +61,7 @@ def analyze(req: VolRequest):
         z95         = norm.ppf(0.95)
 
         # GARCH grid search
-        models_df, best_p, best_q = _garch_grid(returns)
+        models_df, best_p, best_q, best_aic, best_bic = _garch_grid(returns)
 
         # Historical EWMA + rolling (last 504 days for chart performance)
         tail    = min(504, len(ewma_vol_s))
@@ -78,6 +88,8 @@ def analyze(req: VolRequest):
             "garch_models": models_df,
             "best_p":      best_p,
             "best_q":      best_q,
+            "best_aic":    best_aic,
+            "best_bic":    best_bic,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -109,7 +121,7 @@ def forecast(req: ForecastRequest):
         else:
             fitted = arch(returns, vol='Garch', p=req.best_p, q=req.best_q).fit(disp='off')
 
-        cond_vol = fitted.conditional_volatility / 100 * np.sqrt(252)
+        cond_vol = fitted.conditional_volatility * np.sqrt(252)
         tail_cv  = min(252, len(cond_vol))
         hist_vol = []
         for i in range(tail_cv):
@@ -171,4 +183,4 @@ def _garch_grid(returns: pd.Series):
             continue
 
     models_out.sort(key=lambda x: x["bic"])
-    return models_out, best_spec[0], best_spec[1]
+    return models_out, best_spec[0], best_spec[1], round(best_aic, 2), round(best_bic, 2)

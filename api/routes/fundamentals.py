@@ -62,7 +62,8 @@ def get_ohlcv(req: FundamentalsRequest):
                 "close":  _safe_float(row.get("Close")),
                 "volume": _safe_float(row.get("Volume")),
             })
-        result[sym] = rows
+        bare = sym.replace(".NS", "").replace(".BO", "")
+        result[bare] = rows
     return result
 
 
@@ -91,7 +92,8 @@ def get_kpis(req: FundamentalsRequest):
             kurt         = float(returns.kurt())
             pos_pct      = float((returns > 0).sum() / len(returns) * 100)
             diffs        = int(stationarity(df))
-            result[sym] = {
+            bare = sym.replace(".NS", "").replace(".BO", "")
+            result[bare] = {
                 "cagr":          round(_safe_float(CAGR(df, timeframe)) * 100, 2),
                 "volatility":    round(_safe_float(volatility(df, timeframe)) * 100, 2),
                 "sharpe":        round(_safe_float(Sharpe(df, timeframe)), 3),
@@ -133,14 +135,17 @@ def get_rolling_kpis(req: FundamentalsRequest):
             dd, _, _ = drawdown_analysis(df)
 
             combined = pd.DataFrame({
-                "date":           df.index[len(df)-len(r_cagr.dropna()):].strftime("%Y-%m-%d"),
                 "rolling_cagr":   r_cagr,
                 "rolling_sharpe": r_sharpe,
                 "rolling_calmar": r_calmar,
                 "drawdown":       dd * 100,
-            }).dropna().reset_index(drop=True)
+            }).dropna()
+            combined["date"] = combined.index.strftime("%Y-%m-%d")
+            combined = combined.reset_index(drop=True)
 
-            result[sym] = combined.to_dict(orient="records")
-        except Exception:
+            bare = sym.replace(".NS", "").replace(".BO", "")
+            result[bare] = combined.to_dict(orient="records")
+        except Exception as e:
+            print(f"rolling-kpis error for {sym}: {e}")
             continue
     return result

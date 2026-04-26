@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getSectorStocks } from '../lib/api'
@@ -8,6 +9,7 @@ import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react'
 import { cn } from '../lib/utils'
 import type { SectorStock } from '../lib/api'
 import { isMarketOpen } from '../lib/utils'
+import StockChartPanel from '../components/ui/StockChartPanel'
 
 const REFRESH = isMarketOpen() ? 10_000 : 0
 
@@ -71,6 +73,7 @@ const COLS: Column<SectorStock>[] = [
 export default function SectorDetail() {
   const { name } = useParams<{ name: string }>()
   const decoded  = decodeURIComponent(name ?? '')
+  const [selectedStock, setSelectedStock] = useState<SectorStock | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey:        ['sector-stocks', decoded],
@@ -119,6 +122,14 @@ export default function SectorDetail() {
           columns={COLS}
           data={data}
           keyFn={r => r.symbol}
+          onRowClick={setSelectedStock}
+        />
+      )}
+
+      {selectedStock && (
+        <StockChartPanel
+          stock={selectedStock}
+          onClose={() => setSelectedStock(null)}
         />
       )}
     </div>

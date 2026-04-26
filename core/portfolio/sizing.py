@@ -387,6 +387,7 @@ def estimate_expected_returns(
     regimes: dict,
     user_target_annual: float,
     market_annual_return: float = 0.12,
+    ml_views: dict | None = None,
 ) -> dict:
     """
     Blend three signals, then apply James-Stein shrinkage.
@@ -432,11 +433,21 @@ def estimate_expected_returns(
         bear_prob   = regime_probs.get("Bear", 0.0)
         user_weight = max(0.0, 0.20 * (1.0 - 2.0 * bear_prob))
 
-        raw_annual[ticker] = (
-            0.55 * regime_annual
-            + 0.35 * momentum_annual
-            + user_weight * user_target_annual
-        )
+        if ml_views and ticker in ml_views:
+            p_up   = float(ml_views[ticker])
+            ml_ann = (2 * p_up - 1) * 0.30
+            raw_annual[ticker] = (
+                0.45 * regime_annual
+                + 0.30 * momentum_annual
+                + user_weight * user_target_annual
+                + 0.20 * ml_ann
+            )
+        else:
+            raw_annual[ticker] = (
+                0.55 * regime_annual
+                + 0.35 * momentum_annual
+                + user_weight * user_target_annual
+            )
 
     # James-Stein shrinkage across all assets
     tickers  = list(raw_annual.keys())
@@ -771,6 +782,7 @@ def run_optimizer(
     invest_mode: str = "lump_sum",
     dca_months: int = 6,
     stop_loss_k: float = 1.5,
+    ml_views: dict | None = None,
 ):
     DIVIDER = "=" * 65
     print(f"\n{DIVIDER}")
@@ -801,7 +813,7 @@ def run_optimizer(
     print(f"    DCC alpha: {dcc['dcc_a']:.4f}  |  DCC beta: {dcc['dcc_b']:.4f}")
 
     print("\n[4/7] Estimating expected returns (James-Stein shrinkage)...")
-    exp_returns = estimate_expected_returns(returns, regimes, user_target_annual)
+    exp_returns = estimate_expected_returns(returns, regimes, user_target_annual, ml_views=ml_views)
     for t in tickers:
         w = exp_returns[t]["divergence_warning"]
         if w:

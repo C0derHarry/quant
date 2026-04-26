@@ -1,6 +1,8 @@
 import yfinance as yf
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from nsetools import Nse
+from concurrent.futures import ThreadPoolExecutor
 
 router = APIRouter()
 nse    = Nse()
@@ -89,15 +91,55 @@ def get_sector_stocks(sector_name: str):
     return sorted(rows, key=lambda x: x["pct_change"], reverse=True)
 
 
+_ENRICH_INDICES = [
+    "NIFTY 50", "NIFTY NEXT 50", "NIFTY 100", "NIFTY 200", "NIFTY 500",
+    "NIFTY MIDCAP 50", "NIFTY MIDCAP 100", "NIFTY MIDCAP 150",
+    "NIFTY SMALLCAP 50", "NIFTY SMALLCAP 100", "NIFTY SMALLCAP 250",
+    "NIFTY BANK", "NIFTY IT", "NIFTY PHARMA", "NIFTY AUTO",
+    "NIFTY FMCG", "NIFTY METAL", "NIFTY ENERGY", "NIFTY INFRA",
+    "NIFTY FIN SERVICE",
+]
+
+
+def _fetch_name_map() -> dict[str, str]:
+    """Fetch symbol→companyName from multiple indices in parallel."""
+    def _one(idx: str) -> dict[str, str]:
+        try:
+            rows = nse.get_stock_quote_in_index(idx)
+            return {
+                r["symbol"]: r.get("meta", {}).get("companyName", "")
+                for r in rows if r.get("symbol")
+            }
+        except Exception:
+            return {}
+
+    name_map: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for partial in ex.map(_one, _ENRICH_INDICES):
+            name_map.update(partial)
+    return name_map
+
+
 @router.get("/symbols")
 def get_all_symbols(exchange: str = "NSE"):
     try:
-        if exchange == "NSE":
-            codes = nse.get_stock_codes()
-            if isinstance(codes, dict):
-                return [{"symbol": k, "name": v} for k, v in sorted(codes.items())]
-            return [{"symbol": s, "name": s} for s in sorted(codes)]
-        return []
+        if exchange != "NSE":
+            return []
+
+        codes = nse.get_stock_codes()
+        if isinstance(codes, dict):
+            symbols = sorted(codes.keys())
+            base_names: dict[str, str] = codes
+        else:
+            symbols = sorted(codes)
+            base_names = {}
+
+        name_map = _fetch_name_map()
+
+        return [
+            {"symbol": s, "name": name_map.get(s) or base_names.get(s) or s}
+            for s in symbols
+        ]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -105,3 +147,71 @@ def get_all_symbols(exchange: str = "NSE"):
 @router.get("/sector-names")
 def get_sector_names():
     return NSE_SECTOR_NAMES
+
+
+@router.get("/sector/{sector_name}/symbols")
+def get_sector_symbols(sector_name: str):
+    try:
+        raw = nse.get_stock_quote_in_index(sector_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return [
+        {
+            "symbol": s.get("symbol", ""),
+            "name":   s.get("meta", {}).get("companyName", s.get("symbol", "")),
+        }
+        for s in raw
+        if s.get("symbol")
+    ]
+
+
+class SymbolList(BaseModel):
+    symbols: list[str]
+
+
+def _fetch_name(symbol: str) -> tuple[str, str]:
+    suffix = ".NS" if not symbol.endswith((".NS", ".BO")) else ""
+    try:
+        return symbol, yf.Ticker(f"{symbol}{suffix}").info.get("shortName", symbol)
+    except Exception:
+        return symbol, symbol
+
+
+@router.post("/stock-names")
+def get_stock_names(body: SymbolList):
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        results = dict(ex.map(_fetch_name, body.symbols))
+    return results
+
+
+@router.get("/index-list")
+def get_index_list():
+    try:
+        indices = nse.get_index_list()
+        return sorted(indices) if isinstance(indices, list) else []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/index/{index_name}/stocks")
+def get_index_stocks(index_name: str):
+    try:
+        raw = nse.get_stock_quote_in_index(index_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    rows = []
+    for s in raw:
+        try:
+            rows.append({
+                "symbol":     s.get("symbol", ""),
+                "name":       s.get("meta", {}).get("companyName", ""),
+                "price":      float(s.get("lastPrice", 0)),
+                "change":     float(s.get("change", 0)),
+                "pct_change": float(s.get("pChange", 0)),
+                "volume":     s.get("totalTradedVolume", 0),
+                "year_high":  float(s.get("yearHigh", 0)),
+                "year_low":   float(s.get("yearLow", 0)),
+            })
+        except Exception:
+            continue
+    return sorted(rows, key=lambda x: x["pct_change"], reverse=True)

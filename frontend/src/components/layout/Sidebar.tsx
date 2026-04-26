@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   BarChart2, TrendingUp, Search, Activity, Sliders,
-  ChevronRight, Layers, Home,
+  ChevronRight, Layers, Home, Brain,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
@@ -10,6 +10,7 @@ const NAV = [
   { label: 'Value Screen', path: '/value',      icon: Search,    section: 'RESEARCH' },
   { label: 'Deep Dive',  path: '/fundamentals', icon: BarChart2, section: 'RESEARCH' },
   { label: 'Volatility', path: '/volatility',   icon: Activity,  section: 'ANALYTICS' },
+  { label: 'ML Signals', path: '/signals',      icon: Brain,     section: 'ANALYTICS' },
   { label: 'Portfolio',  path: '/portfolio',    icon: Sliders,   section: 'ANALYTICS' },
 ]
 

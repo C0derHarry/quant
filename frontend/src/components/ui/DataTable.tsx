@@ -12,15 +12,16 @@ export interface Column<T> {
 }
 
 interface DataTableProps<T> {
-  columns:   Column<T>[]
-  data:      T[]
-  keyFn:     (row: T) => string
-  className?: string
-  compact?:   boolean
+  columns:      Column<T>[]
+  data:         T[]
+  keyFn:        (row: T) => string
+  className?:   string
+  compact?:     boolean
+  onRowClick?:  (row: T) => void
 }
 
 export default function DataTable<T>({
-  columns, data, keyFn, className, compact = false,
+  columns, data, keyFn, className, compact = false, onRowClick,
 }: DataTableProps<T>) {
   const [sortKey, setSortKey]   = useState<string | null>(null)
   const [sortDir, setSortDir]   = useState<'asc' | 'desc'>('desc')
@@ -80,7 +81,11 @@ export default function DataTable<T>({
           {sorted.map(row => (
             <tr
               key={keyFn(row)}
-              className="tbl-row border-b border-border/50 last:border-0 transition-colors"
+              onClick={() => onRowClick?.(row)}
+              className={cn(
+                'tbl-row border-b border-border/50 last:border-0 transition-colors',
+                onRowClick && 'cursor-pointer hover:bg-bg-elevated',
+              )}
             >
               {columns.map(col => (
                 <td

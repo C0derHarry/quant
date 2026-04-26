@@ -1,25 +1,48 @@
 import { useState, useCallback, useMemo } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useLocation } from 'react-router-dom'
+import { useMutation } from '@tanstack/react-query'
 import {
-  getAllSymbols, getOHLCV, getKPIs, getRollingKPIs,
+  getOHLCV, getKPIs, getRollingKPIs,
   type FundamentalsReq, type OHLCVRow, type KPISet, type RollingRow,
 } from '../lib/api'
-import { PageLoader, ErrorState } from '../components/ui/Spinner'
 import Spinner from '../components/ui/Spinner'
 import MetricCard from '../components/ui/MetricCard'
 import Badge from '../components/ui/Badge'
-import { Search, X, Plus, CheckCircle2, Play, BarChart3, TrendingUp, Activity } from 'lucide-react'
+import StockBrowser from '../components/ui/StockBrowser'
+import { X, Play, BarChart3, TrendingUp, Activity } from 'lucide-react'
 import { cn, fmt, fmtPct, fmtLargeNum } from '../lib/utils'
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar,
 } from 'recharts'
 
-const PAGE     = 15
-const PALETTE  = ['#388BFD', '#3FB950', '#F85149', '#D29922', '#BC8CFF']
-const PERIODS  = ['1mo', '3mo', '6mo', '1y', '2y', '5y']
-const INTERVALS = ['1d', '1wk']
-const WINDOWS  = [30, 60, 90, 180, 252]
+const PALETTE = ['#388BFD', '#3FB950', '#F85149', '#D29922', '#BC8CFF']
+const PERIODS = ['1mo', '3mo', '6mo', '1y', '2y', '5y', '10y']
+
+const PERIOD_INTERVAL_MAP: Record<string, string[]> = {
+  '1mo': ['30m', '60m', '90m', '1d', '5d', '1wk'],
+  '3mo': ['30m', '1h',  '1d', '5d', '1wk', '1mo'],
+  '6mo': ['1d',  '5d',  '1wk', '1mo'],
+  '1y':  ['1d',  '5d',  '1wk', '1mo'],
+  '2y':  ['1d',  '5d',  '1wk', '1mo'],
+  '5y':  ['1d',  '5d',  '1wk', '1mo'],
+  '10y': ['1d',  '5d',  '1wk', '1mo'],
+}
+
+const MIN_WINDOW_BARS: Record<string, number> = {
+  '1mo_1d':   5,  '1mo_1wk':  2,
+  '3mo_1d':  10,  '3mo_1wk':  4,  '3mo_1mo':  2,
+  '6mo_1d':  21,  '6mo_1wk':  8,  '6mo_1mo':  3,
+  '1y_1d':   63,  '1y_5d':   13,  '1y_1wk':  12,  '1y_1mo':  4,
+  '2y_1d':  126,  '2y_5d':   26,  '2y_1wk':  26,  '2y_1mo':  6,
+  '5y_1d':  252,  '5y_5d':   52,  '5y_1wk':  52,  '5y_1mo': 12,
+  '10y_1d': 252, '10y_5d':  104, '10y_1wk': 104, '10y_1mo': 24,
+}
+
+const INTERVAL_LABEL: Record<string, string> = {
+  '30m': '30m', '60m': '60m', '90m': '90m', '1h': '1h',
+  '1d': '1D', '5d': '5D', '1wk': '1W', '1mo': '1M',
+}
 
 type ResultTab    = 'price' | 'kpis' | 'rolling'
 type RollingMetric = 'rolling_cagr' | 'rolling_sharpe' | 'rolling_calmar' | 'drawdown'
@@ -74,45 +97,68 @@ function KPIGrid({ ticker, kpi, color }: { ticker: string; kpi: KPISet; color: s
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <MetricCard size="sm" label="CAGR"
-          value={fmtPct(kpi.cagr * 100, 1)}
-          accent={kpi.cagr >= 0 ? 'gain' : 'loss'} />
+          value={fmtPct(kpi.cagr, 1)}
+          accent={kpi.cagr >= 0 ? 'gain' : 'loss'}
+          tooltip="Compound Annual Growth Rate — total return expressed as an equivalent annual rate over the selected period." />
         <MetricCard size="sm" label="Ann. Volatility"
-          value={fmtPct(kpi.volatility * 100, 1)} />
+          value={fmtPct(kpi.volatility, 1)}
+          tooltip="Annualised standard deviation of daily log returns — measures the magnitude of price swings. Higher = more uncertain." />
         <MetricCard size="sm" label="Sharpe Ratio"
           value={fmt(kpi.sharpe)}
-          accent={kpi.sharpe >= 1 ? 'gain' : kpi.sharpe >= 0.5 ? 'warn' : 'loss'} />
+          accent={kpi.sharpe >= 1 ? 'gain' : kpi.sharpe >= 0.5 ? 'warn' : 'loss'}
+          tooltip="Risk-adjusted return: CAGR ÷ volatility. Above 1 is good, above 2 is excellent. Negative means returns lagged the risk taken." />
         <MetricCard size="sm" label="Max Drawdown"
-          value={fmtPct(kpi.max_drawdown * 100, 1)} accent="loss" />
+          value={fmtPct(kpi.max_drawdown, 1)} accent="loss"
+          tooltip="Largest peak-to-trough decline over the period. Represents the worst loss an investor would have experienced." />
         <MetricCard size="sm" label="Calmar Ratio"
           value={fmt(kpi.calmar)}
-          accent={kpi.calmar >= 0.5 ? 'gain' : 'neutral'} />
+          accent={kpi.calmar >= 0.5 ? 'gain' : 'neutral'}
+          tooltip="CAGR divided by Max Drawdown. Higher values indicate better return per unit of drawdown risk taken." />
         <MetricCard size="sm" label="Skewness"
-          value={fmt(kpi.skewness)} />
+          value={fmt(kpi.skewness)}
+          tooltip="Asymmetry of the return distribution. Positive = more frequent large gains; Negative = more frequent large losses (fat left tail)." />
         <MetricCard size="sm" label="Excess Kurtosis"
-          value={fmt(kpi.excess_kurtosis)} />
+          value={fmt(kpi.excess_kurtosis)}
+          tooltip="Fat-tail risk beyond a normal distribution. High positive values mean extreme moves (crashes or surges) happen more often than expected." />
         <MetricCard size="sm" label="% Positive Days"
           value={`${kpi.pct_positive.toFixed(0)}%`}
-          accent={kpi.pct_positive >= 52 ? 'gain' : 'neutral'} />
+          accent={kpi.pct_positive >= 52 ? 'gain' : 'neutral'}
+          tooltip="Percentage of trading days with a positive return. A consistent edge above 50% is generally favourable." />
       </div>
     </div>
   )
 }
 
 export default function StockFundamentals() {
-  const [search, setSearch]       = useState('')
-  const [page, setPage]           = useState(0)
-  const [selected, setSelected]   = useState<string[]>([])
+  const location = useLocation()
+  const [selected, setSelected] = useState<string[]>(() => {
+    const pre = (location.state as { preselect?: string } | null)?.preselect
+    return pre ? [pre] : []
+  })
   const [period, setPeriod]       = useState('1y')
   const [interval, setInterval]   = useState('1d')
-  const [rollingWindow, setWin]   = useState(90)
+  const [rollingWindow, setWin]   = useState(63)   // MIN_WINDOW_BARS['1y_1d']
   const [resultTab, setResultTab] = useState<ResultTab>('price')
   const [rollingMetric, setRM]    = useState<RollingMetric>('rolling_sharpe')
 
-  const { data: symbols, isLoading, error } = useQuery({
-    queryKey: ['symbols'],
-    queryFn:  () => getAllSymbols('NSE'),
-    staleTime: Infinity,
-  })
+  const validIntervals = PERIOD_INTERVAL_MAP[period] ?? ['1d']
+  const minWindow      = MIN_WINDOW_BARS[`${period}_${interval}`] ?? 5
+  const maxWindow      = Math.max(minWindow * 6, minWindow + 10)
+
+  function handlePeriodChange(p: string) {
+    const valid = PERIOD_INTERVAL_MAP[p] ?? ['1d']
+    const newIv = valid.includes(interval) ? interval : (valid.includes('1d') ? '1d' : valid[0])
+    const minW  = MIN_WINDOW_BARS[`${p}_${newIv}`] ?? 5
+    setPeriod(p)
+    setInterval(newIv)
+    setWin(minW)
+  }
+
+  function handleIntervalChange(iv: string) {
+    const minW = MIN_WINDOW_BARS[`${period}_${iv}`] ?? 5
+    setInterval(iv)
+    setWin(minW)
+  }
 
   const ohlcvMut   = useMutation({ mutationFn: getOHLCV })
   const kpiMut     = useMutation({ mutationFn: getKPIs })
@@ -127,15 +173,6 @@ export default function StockFundamentals() {
     kpiMut.mutate(req)
     rollingMut.mutate(req)
   }, [selected, period, interval, rollingWindow])
-
-  const filtered   = (symbols ?? []).filter(s =>
-    search
-      ? s.symbol.startsWith(search.toUpperCase()) ||
-        s.name.toUpperCase().includes(search.toUpperCase())
-      : true
-  )
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE))
-  const pageItems  = filtered.slice(page * PAGE, (page + 1) * PAGE)
 
   function toggle(sym: string) {
     if (selected.includes(sym)) setSelected(p => p.filter(s => s !== sym))
@@ -194,72 +231,15 @@ export default function StockFundamentals() {
   const xFmt = (d: string) =>
     new Date(d).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
 
-  if (isLoading) return <PageLoader label="Loading symbols…" />
-  if (error)     return <ErrorState message={error.message} />
-
   return (
     <div className="flex h-[calc(100vh-104px)] gap-5 animate-fade-up">
       {/* ── Left: Stock browser ─────────────────────────────────── */}
-      <div className="flex w-[320px] shrink-0 flex-col rounded-md border border-border bg-bg-surface shadow-card">
-        <div className="border-b border-border p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-ink-secondary">
-            NSE Universe <span className="ml-1 text-ink-disabled">(max 5)</span>
-          </h3>
-          <div className="relative">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
-            <input
-              type="text"
-              placeholder="Search symbol or name…"
-              value={search}
-              onChange={e => { setSearch(e.target.value); setPage(0) }}
-              className="w-full rounded border border-border bg-bg-elevated py-1.5 pl-8 pr-3 text-sm text-ink-primary placeholder:text-ink-disabled focus:border-accent focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {pageItems.map(s => {
-            const sel  = selected.includes(s.symbol)
-            const full = !sel && selected.length >= 5
-            return (
-              <button
-                key={s.symbol}
-                onClick={() => toggle(s.symbol)}
-                disabled={full}
-                className={cn(
-                  'flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors',
-                  'border-b border-border/40 last:border-0',
-                  sel  ? 'bg-[rgba(56,139,253,.06)]'     : 'hover:bg-bg-elevated',
-                  full ? 'cursor-not-allowed opacity-40' : '',
-                )}
-              >
-                <div>
-                  <p className={cn('font-mono text-sm font-semibold', sel ? 'text-accent' : 'text-ink-primary')}>
-                    {s.symbol}
-                  </p>
-                  <p className="mt-0.5 max-w-[180px] truncate text-xs text-ink-muted">{s.name}</p>
-                </div>
-                {sel
-                  ? <CheckCircle2 size={15} className="shrink-0 text-accent" />
-                  : <Plus size={15} className="shrink-0 text-ink-disabled" />
-                }
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
-          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-            className="text-xs text-ink-secondary hover:text-ink-primary disabled:text-ink-disabled">
-            ← Prev
-          </button>
-          <span className="text-xs text-ink-muted">{page + 1} / {totalPages}</span>
-          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
-            className="text-xs text-ink-secondary hover:text-ink-primary disabled:text-ink-disabled">
-            Next →
-          </button>
-        </div>
-      </div>
+      <StockBrowser
+        className="w-[320px] shrink-0"
+        selected={selected}
+        onToggle={toggle}
+        maxSelected={5}
+      />
 
       {/* ── Right panel ─────────────────────────────────────────── */}
       <div className="flex flex-1 flex-col gap-4 overflow-hidden">
@@ -294,39 +274,46 @@ export default function StockFundamentals() {
 
         {/* Config bar */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Period */}
           <div className="flex items-center gap-2 rounded border border-border bg-bg-surface px-3 py-2">
             <span className="text-2xs font-semibold uppercase tracking-widest text-ink-disabled">Period</span>
             <div className="flex gap-0.5">
               {PERIODS.map(p => (
-                <button key={p} onClick={() => setPeriod(p)}
+                <button key={p} onClick={() => handlePeriodChange(p)}
                   className={cn('rounded px-2 py-0.5 font-mono text-xs transition-colors',
                     period === p ? 'bg-accent text-white' : 'text-ink-secondary hover:text-ink-primary'
                   )}>{p}</button>
               ))}
             </div>
           </div>
+
+          {/* Interval — filtered by period */}
           <div className="flex items-center gap-2 rounded border border-border bg-bg-surface px-3 py-2">
             <span className="text-2xs font-semibold uppercase tracking-widest text-ink-disabled">Interval</span>
             <div className="flex gap-0.5">
-              {INTERVALS.map(iv => (
-                <button key={iv} onClick={() => setInterval(iv)}
+              {validIntervals.map(iv => (
+                <button key={iv} onClick={() => handleIntervalChange(iv)}
                   className={cn('rounded px-2 py-0.5 font-mono text-xs transition-colors',
                     interval === iv ? 'bg-accent text-white' : 'text-ink-secondary hover:text-ink-primary'
-                  )}>{iv}</button>
+                  )}>{INTERVAL_LABEL[iv] ?? iv}</button>
               ))}
             </div>
           </div>
+
+          {/* Window — number input clamped to [minWindow, maxWindow] */}
           <div className="flex items-center gap-2 rounded border border-border bg-bg-surface px-3 py-2">
             <span className="text-2xs font-semibold uppercase tracking-widest text-ink-disabled">Window</span>
-            <div className="flex gap-0.5">
-              {WINDOWS.map(w => (
-                <button key={w} onClick={() => setWin(w)}
-                  className={cn('rounded px-2 py-0.5 font-mono text-xs transition-colors',
-                    rollingWindow === w ? 'bg-accent text-white' : 'text-ink-secondary hover:text-ink-primary'
-                  )}>{w}d</button>
-              ))}
-            </div>
+            <input
+              type="number"
+              value={rollingWindow}
+              min={minWindow}
+              max={maxWindow}
+              onChange={e => setWin(Math.max(minWindow, Math.min(maxWindow, +e.target.value)))}
+              className="w-14 bg-transparent num font-mono text-xs text-ink-primary focus:outline-none"
+            />
+            <span className="text-2xs text-ink-disabled">bars · min&nbsp;{minWindow}</span>
           </div>
+
           <button
             onClick={runAll}
             disabled={selected.length === 0 || running}

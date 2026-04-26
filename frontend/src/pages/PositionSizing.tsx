@@ -1,14 +1,16 @@
 import { useState, useMemo } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
+import { useMutation } from '@tanstack/react-query'
 import {
-  getAllSymbols, optimizePortfolio,
+  optimizePortfolio,
   type OptimizeResult, type StopRow, type RegimeWarning, type DCARow,
 } from '../lib/api'
-import Spinner, { PageLoader, ErrorState } from '../components/ui/Spinner'
+import Spinner, { ErrorState } from '../components/ui/Spinner'
 import MetricCard from '../components/ui/MetricCard'
 import Badge, { regimeBadge } from '../components/ui/Badge'
 import DataTable, { Column } from '../components/ui/DataTable'
-import { Search, Plus, CheckCircle2, X, AlertTriangle, Play, Layers, ChevronDown } from 'lucide-react'
+import StockBrowser from '../components/ui/StockBrowser'
+import { X, AlertTriangle, Play, Layers, ChevronDown, Brain } from 'lucide-react'
 import { cn, fmt, fmtPct, fmtCurrency } from '../lib/utils'
 import { REGIME_COLOR } from '../lib/utils'
 import {
@@ -16,7 +18,6 @@ import {
   Tooltip, Cell,
 } from 'recharts'
 
-const PAGE    = 15
 const PALETTE = ['#388BFD', '#3FB950', '#F85149', '#D29922', '#BC8CFF', '#56D364', '#E3B341', '#79C0FF']
 
 const STOP_COLS: Column<StopRow>[] = [
@@ -39,14 +40,14 @@ const STOP_COLS: Column<StopRow>[] = [
     key: 'bl_return', header: 'BL Return',
     cell: r => (
       <span className={cn('num font-mono', r.bl_return >= 0 ? 'text-gain' : 'text-loss')}>
-        {fmtPct(r.bl_return * 100)}
+        {fmtPct(r.bl_return)}
       </span>
     ),
     sort: r => r.bl_return, align: 'right',
   },
   {
     key: 'weight', header: 'Weight',
-    cell: r => <span className="num font-mono text-ink-primary">{fmtPct(r.weight * 100)}</span>,
+    cell: r => <span className="num font-mono text-ink-primary">{fmtPct(r.weight)}</span>,
     sort: r => r.weight, align: 'right',
   },
   {
@@ -125,10 +126,18 @@ function NumberInput({
 }
 
 export default function PositionSizing() {
-  const [search, setSearch]     = useState('')
-  const [page, setPage]         = useState(0)
-  const [selected, setSelected] = useState<string[]>([])
-  const [result, setResult]     = useState<OptimizeResult | null>(null)
+  const [searchParams] = useSearchParams()
+
+  const urlTickers = useMemo(
+    () => searchParams.get('tickers')?.split(',').filter(Boolean) ?? [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+  const urlML = searchParams.get('ml') === '1'
+
+  const [selected, setSelected]     = useState<string[]>(urlTickers)
+  const [result, setResult]         = useState<OptimizeResult | null>(null)
+  const [useMLSignals, setUseML]    = useState(urlML)
 
   // Form state
   const [capital, setCapital]     = useState(100000)
@@ -139,27 +148,12 @@ export default function PositionSizing() {
   const [dcaMonths, setDca]       = useState(6)
   const [stopK, setStopK]         = useState(2.0)
 
-  const { data: symbols, isLoading, error } = useQuery({
-    queryKey: ['symbols'],
-    queryFn:  () => getAllSymbols('NSE'),
-    staleTime: Infinity,
-  })
-
   const optMut = useMutation({
     mutationFn: optimizePortfolio,
     onSuccess:  d => setResult(d),
   })
 
   const running = optMut.isPending
-
-  const filtered   = (symbols ?? []).filter(s =>
-    search
-      ? s.symbol.startsWith(search.toUpperCase()) ||
-        s.name.toUpperCase().includes(search.toUpperCase())
-      : true
-  )
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE))
-  const pageItems  = filtered.slice(page * PAGE, (page + 1) * PAGE)
 
   function toggle(sym: string) {
     setSelected(prev =>
@@ -178,6 +172,7 @@ export default function PositionSizing() {
       invest_mode:           investMode,
       dca_months:            dcaMonths,
       stop_loss_k:           stopK,
+      use_ml_signals:        useMLSignals,
     })
   }
 
@@ -203,65 +198,14 @@ export default function PositionSizing() {
     }))
   }, [result])
 
-  if (isLoading) return <PageLoader label="Loading symbols…" />
-  if (error)     return <ErrorState message={error.message} />
-
   return (
     <div className="flex h-[calc(100vh-104px)] gap-5 animate-fade-up">
       {/* ── Left: Stock browser ─────────────────────────────────── */}
-      <div className="flex w-[300px] shrink-0 flex-col rounded-md border border-border bg-bg-surface shadow-card">
-        <div className="border-b border-border p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-ink-secondary">
-            NSE Universe
-          </h3>
-          <div className="relative">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
-            <input
-              type="text"
-              placeholder="Search symbol or name…"
-              value={search}
-              onChange={e => { setSearch(e.target.value); setPage(0) }}
-              className="w-full rounded border border-border bg-bg-elevated py-1.5 pl-8 pr-3 text-sm text-ink-primary placeholder:text-ink-disabled focus:border-accent focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {pageItems.map(s => {
-            const sel = selected.includes(s.symbol)
-            return (
-              <button
-                key={s.symbol}
-                onClick={() => toggle(s.symbol)}
-                className={cn(
-                  'flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors',
-                  'border-b border-border/40 last:border-0',
-                  sel ? 'bg-[rgba(56,139,253,.06)]' : 'hover:bg-bg-elevated',
-                )}
-              >
-                <div>
-                  <p className={cn('font-mono text-sm font-semibold', sel ? 'text-accent' : 'text-ink-primary')}>
-                    {s.symbol}
-                  </p>
-                  <p className="mt-0.5 max-w-[160px] truncate text-xs text-ink-muted">{s.name}</p>
-                </div>
-                {sel
-                  ? <CheckCircle2 size={15} className="shrink-0 text-accent" />
-                  : <Plus size={15} className="shrink-0 text-ink-disabled" />
-                }
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
-          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-            className="text-xs text-ink-secondary hover:text-ink-primary disabled:text-ink-disabled">← Prev</button>
-          <span className="text-xs text-ink-muted">{page + 1} / {totalPages}</span>
-          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
-            className="text-xs text-ink-secondary hover:text-ink-primary disabled:text-ink-disabled">Next →</button>
-        </div>
-      </div>
+      <StockBrowser
+        className="w-[300px] shrink-0"
+        selected={selected}
+        onToggle={toggle}
+      />
 
       {/* ── Right panel ─────────────────────────────────────────── */}
       <div className="flex flex-1 flex-col gap-4 overflow-hidden">
@@ -339,7 +283,33 @@ export default function PositionSizing() {
             {investMode === 'dca' && (
               <NumberInput label="DCA Months" value={dcaMonths} onChange={setDca} min={1} max={36} />
             )}
+
+            {/* ML signals toggle */}
+            <div className="flex flex-col gap-1">
+              <label className="text-2xs font-semibold uppercase tracking-widest text-ink-secondary">
+                ML Signals
+              </label>
+              <button
+                onClick={() => setUseML(p => !p)}
+                className={cn(
+                  'flex h-[34px] items-center gap-2 rounded border px-3 text-xs font-semibold transition-colors',
+                  useMLSignals
+                    ? 'border-accent/40 bg-[rgba(56,139,253,.1)] text-accent'
+                    : 'border-border bg-bg-elevated text-ink-secondary hover:bg-bg-overlay',
+                )}
+              >
+                <Brain size={12} className={useMLSignals ? 'text-accent' : 'text-ink-disabled'} />
+                {useMLSignals ? 'On' : 'Off'}
+              </button>
+            </div>
           </div>
+
+          {useMLSignals && (
+            <p className="mt-2 text-2xs text-ink-muted">
+              ML signal views will be fetched / loaded from cache and blended as a 4th signal
+              (45% regime + 30% momentum + 20% ML) before Black-Litterman optimization.
+            </p>
+          )}
         </div>
 
         {/* Run button */}
@@ -379,6 +349,20 @@ export default function PositionSizing() {
         {/* Results */}
         {result && !running && (
           <div className="flex-1 space-y-4 overflow-y-auto">
+            {/* ML adjusted banner */}
+            {result.ml_adjusted && (
+              <div className="flex items-center gap-2.5 rounded-md border border-accent/30 bg-[rgba(56,139,253,.07)] px-4 py-2.5">
+                <Brain size={14} className="shrink-0 text-accent" />
+                <p className="text-xs text-ink-secondary">
+                  ML signal views applied — return estimates blended{' '}
+                  <span className="font-semibold text-ink-primary">
+                    45% regime + 30% momentum + 20% ML
+                  </span>{' '}
+                  before Black-Litterman optimization.
+                </p>
+              </div>
+            )}
+
             {/* Regime warnings */}
             {result.warnings.length > 0 && (
               <div className="rounded-md border border-warn/30 bg-[rgba(210,153,34,.08)] p-4">
@@ -408,19 +392,25 @@ export default function PositionSizing() {
             {/* Metrics grid */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               <MetricCard size="sm" label="Annual Return"
-                value={fmtPct(result.metrics.annual_return * 100)}
-                accent={result.metrics.annual_return >= 0 ? 'gain' : 'loss'} />
+                value={fmtPct(result.metrics.annual_return)}
+                accent={result.metrics.annual_return >= 0 ? 'gain' : 'loss'}
+                tooltip="Expected portfolio return over a full year, blended from HMM regime signal (55%), momentum (35%), and your target return — then shrunk via James-Stein and blended with market equilibrium through Black-Litterman." />
               <MetricCard size="sm" label="Annual Vol"
-                value={fmtPct(result.metrics.annual_vol * 100)} />
+                value={fmtPct(result.metrics.annual_vol)}
+                tooltip="Annualised standard deviation of portfolio returns, derived from DCC-GARCH one-step-ahead variance forecasts. Measures how much the portfolio value swings year-to-year." />
               <MetricCard size="sm" label="Sharpe Ratio"
                 value={fmt(result.metrics.sharpe)}
-                accent={result.metrics.sharpe >= 1 ? 'gain' : result.metrics.sharpe >= 0.5 ? 'warn' : 'loss'} />
+                accent={result.metrics.sharpe >= 1 ? 'gain' : result.metrics.sharpe >= 0.5 ? 'warn' : 'loss'}
+                tooltip="Return above the risk-free rate (7%) per unit of annual volatility. Above 1.0 is strong; 0.5–1.0 is acceptable; below 0.5 means you are not being adequately compensated for the risk taken." />
               <MetricCard size="sm" label="Monthly VaR 95%"
-                value={fmtPct(result.metrics.monthly_var_95 * 100)} accent="warn" />
+                value={fmtPct(result.metrics.monthly_var_95)} accent="warn"
+                tooltip="Parametric Value-at-Risk: the maximum monthly loss you would expect in 19 out of 20 months (95th percentile), computed from GARCH-forecasted volatility scaled to a 21-day horizon." />
               <MetricCard size="sm" label="MC VaR"
-                value={fmtPct(result.metrics.mc_var * 100)} accent="loss" />
+                value={fmtPct(result.metrics.mc_var)} accent="loss"
+                tooltip="Monte Carlo Value-at-Risk at 95% confidence over 21 days. Uses block-bootstrap resampling and a Student-t fit — whichever gives the more conservative (larger loss) estimate is reported." />
               <MetricCard size="sm" label="MC CVaR"
-                value={fmtPct(result.metrics.mc_cvar * 100)} accent="loss" />
+                value={fmtPct(result.metrics.mc_cvar)} accent="loss"
+                tooltip="Conditional VaR (Expected Shortfall): the average loss across the worst 5% of 21-day Monte Carlo scenarios. More conservative than VaR because it captures how bad the tail actually is, not just the threshold." />
             </div>
 
             {/* Weight distribution */}

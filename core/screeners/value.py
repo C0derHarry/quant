@@ -133,12 +133,20 @@ def qarp_screener(ticker_list):
             is_healthy = debt_to_equity < 0.5
             is_cheap = current_pe < 15 or current_pe < (trailing_pe * 0.9) # Simple proxy for 'on sale'
 
-            # if is_quality and is_healthy and is_cheap:
+            criteria_met = sum([is_quality, is_healthy, is_cheap])
+            if criteria_met == 3:
+                verdict = "BUY"
+            elif criteria_met == 2:
+                verdict = "WATCH"
+            else:
+                verdict = "AVOID"
+
             results.append({
                 "Ticker": ticker,
                 "ROE": f"{return_on_equity:.2%}",
                 "D/E": round(debt_to_equity, 2),
-                "Forward P/E": round(current_pe, 2)
+                "Forward P/E": round(current_pe, 2),
+                "Verdict": verdict,
             })
 
             
