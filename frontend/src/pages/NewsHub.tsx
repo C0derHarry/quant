@@ -134,12 +134,12 @@ function ImpactCard({ article, impact }: { article: NewsArticle; impact: ImpactD
     )
   }
 
-  // Market closed: sentiment probability bars from article's own score
-  const score    = Math.abs(article.sentiment_score)
-  const isBull   = article.sentiment_label.includes('Bullish')
-  const isBear   = article.sentiment_label.includes('Bearish')
-  const bullish  = isBull ? score : 0
-  const bearish  = isBear ? score : 0
+  // Market closed: sentiment probability bars
+  // Use ticker-specific score if available (more relevant than overall article score).
+  // Positive score = bullish, negative = bearish — derive direction from sign, not label.
+  const rawScore = article.tickers[0]?.sentiment_score ?? article.sentiment_score
+  const bullish  = Math.max(0,  rawScore)
+  const bearish  = Math.max(0, -rawScore)
   const neutral  = Math.max(0, 1 - bullish - bearish)
 
   const Bar = ({ label, pct, color }: { label: string; pct: number; color: string }) => (
