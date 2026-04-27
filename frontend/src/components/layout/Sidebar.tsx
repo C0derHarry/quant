@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   BarChart2, TrendingUp, Search, Activity, Sliders,
-  ChevronRight, Layers, Home, Brain,
+  ChevronRight, Layers, Home, Brain, Newspaper,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
@@ -11,10 +11,11 @@ const NAV = [
   { label: 'Deep Dive',  path: '/fundamentals', icon: BarChart2, section: 'RESEARCH' },
   { label: 'Volatility', path: '/volatility',   icon: Activity,  section: 'ANALYTICS' },
   { label: 'ML Signals', path: '/signals',      icon: Brain,     section: 'ANALYTICS' },
-  { label: 'Portfolio',  path: '/portfolio',    icon: Sliders,   section: 'ANALYTICS' },
+  { label: 'Portfolio',  path: '/portfolio',    icon: Sliders,    section: 'ANALYTICS' },
+  { label: 'News Hub',   path: '/news',          icon: Newspaper,  section: 'NEWS' },
 ]
 
-const SECTIONS = ['MARKET', 'RESEARCH', 'ANALYTICS']
+const SECTIONS = ['MARKET', 'RESEARCH', 'ANALYTICS', 'NEWS']
 
 export default function Sidebar() {
   const { pathname } = useLocation()

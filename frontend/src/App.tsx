@@ -7,6 +7,7 @@ import StockFundamentals from './pages/StockFundamentals'
 import VolatilityForecast from './pages/VolatilityForecast'
 import PositionSizing    from './pages/PositionSizing'
 import MLSignals         from './pages/MLSignals'
+import NewsHub           from './pages/NewsHub'
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/volatility"  element={<VolatilityForecast />} />
         <Route path="/portfolio"   element={<PositionSizing />} />
         <Route path="/signals"     element={<MLSignals />} />
+        <Route path="/news"        element={<NewsHub />} />
       </Routes>
     </Layout>
   )

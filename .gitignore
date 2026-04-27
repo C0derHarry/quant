@@ -3,8 +3,11 @@ venv/
 .venv/
 env/
 bin/
-lib/
+/lib/
 share/
+
+# Allow frontend source lib
+!frontend/src/lib/
 
 # Python cache and compiled files
 __pycache__/
