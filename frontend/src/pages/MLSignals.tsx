@@ -204,6 +204,107 @@ function CalibrationChart({ data }: { data: { predicted: number; actual: number 
   )
 }
 
+// ── threshold guidance ────────────────────────────────────────────────────────
+
+const PRESETS = [
+  {
+    label: 'Conservative',
+    long: 0.70, short: 0.30,
+    desc: 'Only act on high-conviction signals. Expect fewer positions but stronger edge.',
+  },
+  {
+    label: 'Balanced',
+    long: 0.60, short: 0.40,
+    desc: 'Default setting. Filters out genuine uncertainty while keeping reasonable signal frequency.',
+  },
+  {
+    label: 'Active',
+    long: 0.55, short: 0.45,
+    desc: 'More signals with some uncertainty accepted. Suits frequent rebalancers.',
+  },
+]
+
+function ThresholdGuidance({
+  longThr, shortThr, onPreset,
+}: { longThr: number; shortThr: number; onPreset: (l: number, s: number) => void }) {
+  const flatWidth = Math.round((longThr - shortThr) * 100)
+
+  const activePreset = PRESETS.find(p => p.long === longThr && p.short === shortThr)
+
+  let dynamicDesc: string
+  if (flatWidth >= 40) {
+    dynamicDesc = `${flatWidth}% flat band - very selective. Only readings below ${Math.round(shortThr * 100)}% or above ${Math.round(longThr * 100)}% generate a signal. Expect infrequent but high-conviction calls.`
+  } else if (flatWidth >= 20) {
+    dynamicDesc = `${flatWidth}% flat band - balanced filter. Readings between ${Math.round(shortThr * 100)}%–${Math.round(longThr * 100)}% are treated as uncertain and ignored. Good signal-to-noise for most portfolios.`
+  } else {
+    dynamicDesc = `${flatWidth}% flat band - narrow filter. Most readings will produce a Long or Short signal. Useful for active strategies but expect more false positives.`
+  }
+
+  return (
+    <div className="border-t border-border/50 px-5 py-3.5 space-y-3">
+      {/* Preset chips */}
+      <div className="flex items-center gap-2">
+        <span className="text-2xs font-semibold uppercase tracking-widest text-ink-disabled w-14 shrink-0">
+          Presets
+        </span>
+        <div className="flex gap-2">
+          {PRESETS.map(p => {
+            const active = p.long === longThr && p.short === shortThr
+            return (
+              <button
+                key={p.label}
+                onClick={() => onPreset(p.long, p.short)}
+                className={cn(
+                  'rounded border px-3 py-1 text-xs font-medium transition-colors',
+                  active
+                    ? 'border-accent bg-[rgba(56,139,253,.12)] text-accent'
+                    : 'border-border text-ink-secondary hover:border-ink-muted hover:text-ink-primary',
+                )}
+              >
+                {p.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Zone diagram */}
+      <div className="space-y-1.5">
+        <div className="flex h-4 w-full overflow-hidden rounded-full text-2xs font-semibold">
+          <div
+            className="flex items-center justify-center bg-loss/20 text-loss"
+            style={{ width: `${Math.round(shortThr * 100)}%` }}
+          >
+            Short
+          </div>
+          <div
+            className="flex items-center justify-center bg-bg-elevated text-ink-disabled"
+            style={{ width: `${flatWidth}%` }}
+          >
+            Flat
+          </div>
+          <div
+            className="flex items-center justify-center bg-gain/20 text-gain flex-1"
+          >
+            Long
+          </div>
+        </div>
+        <div className="flex justify-between text-2xs text-ink-disabled font-mono">
+          <span>0%</span>
+          <span className="text-loss">{Math.round(shortThr * 100)}%</span>
+          <span className="text-gain">{Math.round(longThr * 100)}%</span>
+          <span>100%</span>
+        </div>
+      </div>
+
+      {/* Dynamic description */}
+      <p className="text-xs text-ink-muted leading-relaxed">
+        {activePreset ? <><span className="font-medium text-ink-secondary">{activePreset.label}:</span> {activePreset.desc}</> : dynamicDesc}
+      </p>
+    </div>
+  )
+}
+
 // ── main page ─────────────────────────────────────────────────────────────────
 
 type Tab = 'history' | 'fi' | 'calibration'
@@ -290,24 +391,33 @@ export default function MLSignals() {
         </div>
 
         {/* Threshold sliders */}
-        <div className="flex items-center gap-8 rounded-lg border border-border bg-bg-surface px-5 py-3.5">
-          {[
-            { label: 'Long threshold', value: longThr,  set: setLongThr,  min: 0.50, max: 0.90, color: '#3FB950' },
-            { label: 'Short threshold', value: shortThr, set: setShortThr, min: 0.10, max: 0.50, color: '#F85149' },
-          ].map(({ label, value, set, min, max, color }) => (
-            <div key={label} className="flex flex-1 items-center gap-3">
-              <span className="w-32 text-xs text-ink-secondary">{label}</span>
-              <input
-                type="range" min={min} max={max} step={0.05} value={value}
-                onChange={e => set(+e.target.value)}
-                className="flex-1 accent-[var(--color-accent)]"
-                style={{ accentColor: color }}
-              />
-              <span className="w-10 font-mono text-xs font-semibold text-ink-primary text-right">
-                {(value * 100).toFixed(0)}%
-              </span>
-            </div>
-          ))}
+        <div className="rounded-lg border border-border bg-bg-surface">
+          <div className="flex items-center gap-8 px-5 py-3.5">
+            {[
+              { label: 'Long threshold', value: longThr,  set: setLongThr,  min: 0.50, max: 0.90, color: '#3FB950' },
+              { label: 'Short threshold', value: shortThr, set: setShortThr, min: 0.10, max: 0.50, color: '#F85149' },
+            ].map(({ label, value, set, min, max, color }) => (
+              <div key={label} className="flex flex-1 items-center gap-3">
+                <span className="w-32 text-xs text-ink-secondary">{label}</span>
+                <input
+                  type="range" min={min} max={max} step={0.05} value={value}
+                  onChange={e => set(+e.target.value)}
+                  className="flex-1 accent-[var(--color-accent)]"
+                  style={{ accentColor: color }}
+                />
+                <span className="w-10 font-mono text-xs font-semibold text-ink-primary text-right">
+                  {(value * 100).toFixed(0)}%
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Guidance panel */}
+          <ThresholdGuidance
+            longThr={longThr}
+            shortThr={shortThr}
+            onPreset={(l, s) => { setLongThr(l); setShortThr(s) }}
+          />
         </div>
 
         {/* Error */}
@@ -319,7 +429,7 @@ export default function MLSignals() {
             <Brain size={32} className="mb-3 text-ink-disabled" strokeWidth={1.2} />
             <p className="text-sm font-medium text-ink-secondary">Select stocks and click Run Signals</p>
             <p className="mt-1 text-xs text-ink-disabled">
-              Trains a calibrated GBM per ticker — P(5-day up move)
+              Trains a calibrated GBM per ticker - P(5-day up move)
             </p>
           </div>
         )}
@@ -367,7 +477,7 @@ export default function MLSignals() {
               {activeTab === 'history' && (
                 <>
                   <p className="mb-3 text-xs text-ink-muted">
-                    30-day P(5d-up) — green line = long threshold, red line = short threshold
+                    30-day P(5d-up) - green line = long threshold, red line = short threshold
                   </p>
                   <HistoryChart
                     history={activeSignal.signal_history}
@@ -390,7 +500,7 @@ export default function MLSignals() {
                 <>
                   <div className="mb-3 flex items-center gap-2">
                     <p className="text-xs text-ink-muted">
-                      Predicted probability vs observed frequency — dashed grey = perfect calibration
+                      Predicted probability vs observed frequency - dashed grey = perfect calibration
                     </p>
                     <Info size={12} className="shrink-0 text-ink-disabled" />
                   </div>
@@ -405,12 +515,12 @@ export default function MLSignals() {
                 {
                   label: 'Log-Loss',
                   val: activeSignal.metrics.log_loss.toFixed(4),
-                  tip: 'Probabilistic cross-entropy loss on the held-out test set. A random coin-flip scores 0.693 (ln 2). Lower is better — beating 0.693 means the model adds real information beyond guessing.',
+                  tip: 'Probabilistic cross-entropy loss on the held-out test set. A random coin-flip scores 0.693 (ln 2). Lower is better - beating 0.693 means the model adds real information beyond guessing.',
                 },
                 {
                   label: 'Brier Score',
                   val: activeSignal.metrics.brier.toFixed(4),
-                  tip: 'Mean squared error between the predicted probability and the actual outcome (0 or 1). A random classifier scores ≈ 0.25. Lower is better — the model should score below 0.25 to be considered useful.',
+                  tip: 'Mean squared error between the predicted probability and the actual outcome (0 or 1). A random classifier scores ≈ 0.25. Lower is better - the model should score below 0.25 to be considered useful.',
                 },
                 {
                   label: 'ROC-AUC',
@@ -420,7 +530,7 @@ export default function MLSignals() {
                 {
                   label: 'Accuracy',
                   val: fmtPct(activeSignal.metrics.accuracy * 100),
-                  tip: 'Directional accuracy at a 0.5 decision threshold on the test set. Compare to the base rate below — a model is only useful if its accuracy meaningfully exceeds the fraction of up-days.',
+                  tip: 'Directional accuracy at a 0.5 decision threshold on the test set. Compare to the base rate below - a model is only useful if its accuracy meaningfully exceeds the fraction of up-days.',
                 },
                 {
                   label: 'Test bars',

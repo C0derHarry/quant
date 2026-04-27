@@ -103,7 +103,7 @@ export default function ValueScreen() {
           <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" />
           <p className="text-xs leading-relaxed text-warn/90">
             <span className="font-semibold">Banking &amp; NBFC stocks are not suitable for these screeners.</span>{' '}
-            Banks maintain their balance sheets differently — EBIT, Net PPE, and Working Capital metrics are not meaningful for them.
+            Banks maintain their balance sheets differently - EBIT, Net PPE, and Working Capital metrics are not meaningful for them.
             Results for banking stocks will be misleading. Stick to non-financial sectors.
           </p>
         </div>
@@ -183,9 +183,9 @@ export default function ValueScreen() {
         {screener === 'qarp' && (
           <div className="flex flex-wrap items-center gap-4 rounded-md border border-border bg-bg-surface px-4 py-3 text-xs text-ink-muted">
             <span className="font-semibold text-ink-secondary">Verdict criteria:</span>
-            <span><span className="font-semibold text-gain">Buy</span> — ROE &gt; 20%, D/E &lt; 0.5, Forward P/E &lt; 15 (all three met)</span>
-            <span><span className="font-semibold text-warn">Watch</span> — two of three criteria met</span>
-            <span><span className="font-semibold text-loss">Avoid</span> — fewer than two criteria met</span>
+            <span><span className="font-semibold text-gain">Buy</span> - ROE &gt; 20%, D/E &lt; 0.5, Forward P/E &lt; 15 (all three met)</span>
+            <span><span className="font-semibold text-warn">Watch</span> - two of three criteria met</span>
+            <span><span className="font-semibold text-loss">Avoid</span> - fewer than two criteria met</span>
           </div>
         )}
 
@@ -207,7 +207,7 @@ export default function ValueScreen() {
           {results && (
             <div className="p-4">
               <p className="mb-3 text-xs text-ink-muted">
-                {results.length} results — {screener === 'magic' ? 'ranked by Earnings Yield + ROC' : 'ROE, D/E & P/E screened'}
+                {results.length} results - {screener === 'magic' ? 'ranked by Earnings Yield + ROC' : 'ROE, D/E & P/E screened'}
               </p>
               <DataTable
                 columns={resultCols}

@@ -188,7 +188,7 @@ export default function VolatilityForecast() {
 
         {analysis && !analyzing && (
           <>
-            {/* Metrics strip — row 1: vol metrics */}
+            {/* Metrics strip - row 1: vol metrics */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               <MetricCard size="sm" label="Opt. Lambda"
                 value={analysis.opt_lambda.toFixed(4)} accent="accent"
@@ -199,30 +199,30 @@ export default function VolatilityForecast() {
               <MetricCard size="sm" label="Current Vol"
                 value={fmtPct(analysis.current_vol, 2)}
                 accent={analysis.current_vol > analysis.mean_vol ? 'loss' : 'gain'}
-                tooltip="Most recent EWMA annualised volatility — the market's current risk estimate for this stock." />
+                tooltip="Most recent EWMA annualised volatility - the market's current risk estimate for this stock." />
               <MetricCard size="sm" label="Peak Vol"
                 value={fmtPct(analysis.peak_vol, 2)} accent="loss"
                 sub={analysis.peak_date}
                 tooltip="Highest annualised EWMA volatility recorded over the selected data period, and the date it occurred." />
               <MetricCard size="sm" label="Mean Vol"
                 value={fmtPct(analysis.mean_vol, 2)}
-                tooltip="Average annualised EWMA volatility over the selected data period — the stock's long-run volatility baseline." />
+                tooltip="Average annualised EWMA volatility over the selected data period - the stock's long-run volatility baseline." />
               <MetricCard size="sm" label="1D 1% VaR (₹1M)"
                 value={fmtRupee(analysis.var_1d_1m)} accent="warn"
                 tooltip="Value at Risk: the maximum expected 1-day loss on a ₹10L position at 99% confidence (1% chance of exceeding this loss)." />
             </div>
 
-            {/* Metrics strip — row 2: best GARCH */}
+            {/* Metrics strip - row 2: best GARCH */}
             <div className="grid grid-cols-3 gap-3">
               <MetricCard size="sm" label="Best GARCH"
                 value={`GARCH(${analysis.best_p},${analysis.best_q})`} accent="accent"
                 tooltip="Best-fit GARCH(p,q) model selected by lowest joint AIC and BIC from the candidate grid. p = ARCH lags, q = GARCH lags." />
               <MetricCard size="sm" label="AIC"
                 value={analysis.best_aic.toFixed(2)}
-                tooltip="Akaike Information Criterion — measures model fit quality while penalising complexity. Lower is better." />
+                tooltip="Akaike Information Criterion - measures model fit quality while penalising complexity. Lower is better." />
               <MetricCard size="sm" label="BIC"
                 value={analysis.best_bic.toFixed(2)}
-                tooltip="Bayesian Information Criterion — similar to AIC but with a stronger complexity penalty. Lower is better. Used alongside AIC to select the best model." />
+                tooltip="Bayesian Information Criterion - similar to AIC but with a stronger complexity penalty. Lower is better. Used alongside AIC to select the best model." />
             </div>
 
             {/* EWMA tabs */}

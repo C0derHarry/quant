@@ -2,12 +2,12 @@
 EWMA Volatility Model
 =========================================================
 Implements:
-  1. ewma_variance()       — recursive EWMA with configurable λ
-  2. ewma_volatility()     — annualised σ = σ_daily × √252
-  3. get_optimal_lambda()  — MLE-optimal decay factor
-  4. half_life()           — shock decay half-life
-  5. decay_table()         — λ sensitivity summary
-  6. Plot helpers          — EWMA vs rolling, lambda sweep
+  1. ewma_variance()       - recursive EWMA with configurable λ
+  2. ewma_volatility()     - annualised σ = σ_daily × √252
+  3. get_optimal_lambda()  - MLE-optimal decay factor
+  4. half_life()           - shock decay half-life
+  5. decay_table()         - λ sensitivity summary
+  6. Plot helpers          - EWMA vs rolling, lambda sweep
 """
 
 import numpy as np
@@ -170,7 +170,7 @@ def plot_lambda_sensitivity(
 
     fig, axes = plt.subplots(2, 1, figsize=(14, 10), sharex=True,
                              gridspec_kw={"height_ratios": [1, 2.5]})
-    fig.suptitle("EWMA Volatility — Lambda Sensitivity Sweep",
+    fig.suptitle("EWMA Volatility - Lambda Sensitivity Sweep",
                  fontsize=14, fontweight="bold")
 
     axes[0].plot(prices, color="#555555", linewidth=0.9)

@@ -179,7 +179,7 @@ export default function MarketOverview() {
       {/* Sector grid */}
       <section>
         <h2 className="mb-3 text-2xs font-semibold uppercase tracking-[0.12em] text-ink-disabled">
-          Sector Performance — click to drill down
+          Sector Performance - click to drill down
         </h2>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
           {Object.entries(sectors ?? {}).map(([name, snap]) => (
@@ -191,7 +191,7 @@ export default function MarketOverview() {
       {/* Index Explorer */}
       <section>
         <h2 className="mb-3 text-2xs font-semibold uppercase tracking-[0.12em] text-ink-disabled">
-          Index Explorer — search any NSE index
+          Index Explorer - search any NSE index
         </h2>
 
         {/* Search combobox */}

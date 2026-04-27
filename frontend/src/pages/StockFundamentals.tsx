@@ -99,10 +99,10 @@ function KPIGrid({ ticker, kpi, color }: { ticker: string; kpi: KPISet; color: s
         <MetricCard size="sm" label="CAGR"
           value={fmtPct(kpi.cagr, 1)}
           accent={kpi.cagr >= 0 ? 'gain' : 'loss'}
-          tooltip="Compound Annual Growth Rate — total return expressed as an equivalent annual rate over the selected period." />
+          tooltip="Compound Annual Growth Rate - total return expressed as an equivalent annual rate over the selected period." />
         <MetricCard size="sm" label="Ann. Volatility"
           value={fmtPct(kpi.volatility, 1)}
-          tooltip="Annualised standard deviation of daily log returns — measures the magnitude of price swings. Higher = more uncertain." />
+          tooltip="Annualised standard deviation of daily log returns - measures the magnitude of price swings. Higher = more uncertain." />
         <MetricCard size="sm" label="Sharpe Ratio"
           value={fmt(kpi.sharpe)}
           accent={kpi.sharpe >= 1 ? 'gain' : kpi.sharpe >= 0.5 ? 'warn' : 'loss'}
@@ -287,7 +287,7 @@ export default function StockFundamentals() {
             </div>
           </div>
 
-          {/* Interval — filtered by period */}
+          {/* Interval - filtered by period */}
           <div className="flex items-center gap-2 rounded border border-border bg-bg-surface px-3 py-2">
             <span className="text-2xs font-semibold uppercase tracking-widest text-ink-disabled">Interval</span>
             <div className="flex gap-0.5">
@@ -300,7 +300,7 @@ export default function StockFundamentals() {
             </div>
           </div>
 
-          {/* Window — number input clamped to [minWindow, maxWindow] */}
+          {/* Window - number input clamped to [minWindow, maxWindow] */}
           <div className="flex items-center gap-2 rounded border border-border bg-bg-surface px-3 py-2">
             <span className="text-2xs font-semibold uppercase tracking-widest text-ink-disabled">Window</span>
             <input
@@ -371,7 +371,7 @@ export default function StockFundamentals() {
                   <div className="space-y-6">
                     <div>
                       <p className="mb-3 text-2xs font-semibold uppercase tracking-[.08em] text-ink-disabled">
-                        Normalised Performance — rebased to 100
+                        Normalised Performance - rebased to 100
                       </p>
                       <ResponsiveContainer width="100%" height={280}>
                         <LineChart data={normalizedData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -393,7 +393,7 @@ export default function StockFundamentals() {
                     {volumeData.length > 0 && (
                       <div>
                         <p className="mb-3 text-2xs font-semibold uppercase tracking-[.08em] text-ink-disabled">
-                          Volume — {selected[0]}
+                          Volume - {selected[0]}
                         </p>
                         <ResponsiveContainer width="100%" height={110}>
                           <BarChart data={volumeData} margin={{ top: 0, right: 20, left: 0, bottom: 0 }}>

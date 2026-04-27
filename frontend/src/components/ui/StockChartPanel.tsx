@@ -120,7 +120,7 @@ export default function StockChartPanel({ stock, onClose }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px] p-4"
       onClick={onClose}>
 
-      {/* Modal — 16:9, max ~960×540 */}
+      {/* Modal - 16:9, max ~960×540 */}
       <div
         className="relative w-full max-w-[960px] rounded-lg border border-border bg-bg-surface shadow-2xl"
         style={{ aspectRatio: '16/9' }}

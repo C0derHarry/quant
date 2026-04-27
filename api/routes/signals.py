@@ -103,7 +103,7 @@ def analyze(req: SignalRequest):
                 for feat, imp in fi.items()
             ]
 
-            # Signal history — last 30 rows
+            # Signal history - last 30 rows
             hist = sig_df.tail(30).copy()
             hist.index = hist.index.strftime("%Y-%m-%d")
             history = [

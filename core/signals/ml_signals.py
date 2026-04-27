@@ -9,18 +9,18 @@ The core upgrade over rule-based signals:
 
 Pipeline
 ────────
-1. Base features     — RSI, MACD histogram, MACD signal cross, Bollinger %B,
+1. Base features     - RSI, MACD histogram, MACD signal cross, Bollinger %B,
                        ADX, DI spread, ATR/close, 5/20/60d returns, EWMA/rolling
                        vol ratio (all computable with data ≤ t, no look-ahead)
-2. Lag augmentation  — each base feature is shifted by 1, 2, 5 bars so the
+2. Lag augmentation  - each base feature is shifted by 1, 2, 5 bars so the
                        model sees recent history, not just today's snapshot
-3. Target            — sign of forward 5-day return (1 = up, 0 = down)
+3. Target            - sign of forward 5-day return (1 = up, 0 = down)
                        constructed via shift(-5), dropped from feature matrix
-4. Chronological split — last 20% of sorted dates as test set, NO shuffling
-5. Model             — GradientBoostingClassifier wrapped in
+4. Chronological split - last 20% of sorted dates as test set, NO shuffling
+5. Model             - GradientBoostingClassifier wrapped in
                        CalibratedClassifierCV (isotonic regression) so
                        predict_proba produces true probabilities, not just ranks
-6. Evaluation        — log-loss, Brier score, ROC-AUC, accuracy + base rate
+6. Evaluation        - log-loss, Brier score, ROC-AUC, accuracy + base rate
 
 Leakage checklist (all boxes ticked)
 ─────────────────────────────────────
@@ -68,12 +68,12 @@ ROLLING_VOL_WINDOW = 252        # denominator window for vol-ratio feature
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 1 — FEATURE ENGINEERING
+# SECTION 1 - FEATURE ENGINEERING
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _ewma_vol(returns: pd.Series, lam: float = EWMA_LAMBDA) -> pd.Series:
     """
-    Recursive EWMA annualised daily volatility — no look-ahead.
+    Recursive EWMA annualised daily volatility - no look-ahead.
 
     Update rule:  var[t] = λ·var[t-1] + (1-λ)·r[t]²
 
@@ -101,17 +101,17 @@ def build_base_features(df: pd.DataFrame) -> pd.DataFrame:
     Returns
     ───────
     DataFrame with columns:
-      rsi          — 14-period RSI
-      macd_hist    — MACD line minus signal line
-      macd_cross   — +1 bullish cross, -1 bearish cross, 0 no cross
-      pct_b        — Bollinger %B  (position within bands, 0–1 typically)
-      adx          — 14-period Average Directional Index (trend strength)
-      di_spread    — +DI minus -DI (directional bias)
-      atr_ratio    — ATR / Close (normalised intraday volatility)
-      ret_5d       — 5-day backward return
-      ret_20d      — 20-day backward return
-      ret_60d      — 60-day backward return
-      vol_ratio    — EWMA annualised vol / 252-day rolling vol
+      rsi          - 14-period RSI
+      macd_hist    - MACD line minus signal line
+      macd_cross   - +1 bullish cross, -1 bearish cross, 0 no cross
+      pct_b        - Bollinger %B  (position within bands, 0–1 typically)
+      adx          - 14-period Average Directional Index (trend strength)
+      di_spread    - +DI minus -DI (directional bias)
+      atr_ratio    - ATR / Close (normalised intraday volatility)
+      ret_5d       - 5-day backward return
+      ret_20d      - 20-day backward return
+      ret_60d      - 60-day backward return
+      vol_ratio    - EWMA annualised vol / 252-day rolling vol
                      > 1 → vol above long-run average (elevated risk)
     """
     df    = df.copy()
@@ -139,7 +139,7 @@ def build_base_features(df: pd.DataFrame) -> pd.DataFrame:
     feat["adx"]        = adx_df["ADX"]
     feat["di_spread"]  = adx_df["+DI"] - adx_df["-DI"]
 
-    # ── ATR / Close — normalised volatility ──────────────────────────────────
+    # ── ATR / Close - normalised volatility ──────────────────────────────────
     feat["atr_ratio"] = ATR(df, period=14)["ATR"] / close
 
     # ── Momentum returns (backward, no leakage) ───────────────────────────────
@@ -159,7 +159,7 @@ def add_lag_features(feat: pd.DataFrame, lags: list[int] = LAG_DAYS) -> pd.DataF
     """
     Append t-lag versions of every base feature.
 
-    Shift by +lag means we look at the value from lag bars ago — always
+    Shift by +lag means we look at the value from lag bars ago - always
     in the past, never the future.  The model therefore sees the current
     state AND how it evolved over recent history.
 
@@ -179,7 +179,7 @@ def build_target(df: pd.DataFrame, horizon: int = FORWARD_HORIZON) -> pd.Series:
     Binary classification target: 1 if close[t + horizon] > close[t].
 
     Construction is leakage-free because:
-      (a) this column is ONLY used as y — never as a feature
+      (a) this column is ONLY used as y - never as a feature
       (b) rows where the target is NaN (last `horizon` bars) are
           dropped in prepare_dataset() before any model sees them
     """
@@ -197,7 +197,7 @@ def prepare_dataset(
 
     Rows are dropped where any indicator hasn't warmed up yet (early bars)
     or where the forward target is unknown (last `horizon` bars).
-    Index order is preserved — no shuffling.
+    Index order is preserved - no shuffling.
     """
     feat   = build_base_features(df)
     feat   = add_lag_features(feat, lags)
@@ -210,7 +210,7 @@ def prepare_dataset(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 2 — CHRONOLOGICAL TRAIN / TEST SPLIT
+# SECTION 2 - CHRONOLOGICAL TRAIN / TEST SPLIT
 # ─────────────────────────────────────────────────────────────────────────────
 
 def chrono_split(
@@ -237,7 +237,7 @@ def chrono_split(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 3 — MODEL CONSTRUCTION
+# SECTION 3 - MODEL CONSTRUCTION
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_model(
@@ -253,7 +253,7 @@ def build_model(
     Why calibration?
     ────────────────
     Raw GBM probabilities are well *ranked* (high AUC) but poorly
-    *calibrated* — they cluster near 0 and 1 rather than reflecting
+    *calibrated* - they cluster near 0 and 1 rather than reflecting
     true likelihoods.  CalibratedClassifierCV fits an isotonic regression
     (or Platt sigmoid) on cross-validation folds of the training set to
     map raw scores → reliable probabilities.
@@ -263,10 +263,10 @@ def build_model(
 
     Hyper-parameter notes
     ─────────────────────
-    max_depth=4         — shallow trees reduce overfitting on noisy returns
-    subsample=0.80      — stochastic boosting, improves generalisation
-    min_samples_leaf=20 — at least 20 bars per leaf prevents tiny splits
-    StandardScaler      — no-op for trees but enables future model swaps
+    max_depth=4         - shallow trees reduce overfitting on noisy returns
+    subsample=0.80      - stochastic boosting, improves generalisation
+    min_samples_leaf=20 - at least 20 bars per leaf prevents tiny splits
+    StandardScaler      - no-op for trees but enables future model swaps
                           (e.g., drop-in logistic regression comparison)
     """
     base_gbm = GradientBoostingClassifier(
@@ -290,7 +290,7 @@ def build_model(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 4 — EVALUATION
+# SECTION 4 - EVALUATION
 # ─────────────────────────────────────────────────────────────────────────────
 
 def evaluate(
@@ -304,11 +304,11 @@ def evaluate(
 
     Metrics
     ───────
-    log_loss  — probabilistic loss; random classifier ≈ ln(2) ≈ 0.693
-    brier     — MSE of proba; random classifier ≈ 0.25
-    roc_auc   — ranking quality; 0.5 = random, 1.0 = perfect
-    accuracy  — directional accuracy at 0.5 threshold
-    pos_rate  — base rate (fraction of up-days in test set)
+    log_loss  - probabilistic loss; random classifier ≈ ln(2) ≈ 0.693
+    brier     - MSE of proba; random classifier ≈ 0.25
+    roc_auc   - ranking quality; 0.5 = random, 1.0 = perfect
+    accuracy  - directional accuracy at 0.5 threshold
+    pos_rate  - base rate (fraction of up-days in test set)
 
     A model is useful when:
       log_loss  < ln(2)   (beats random)
@@ -330,7 +330,7 @@ def evaluate(
     if verbose:
         div = "=" * 55
         print(f"\n{div}")
-        print("  ML SIGNAL MODEL — TEST-SET EVALUATION")
+        print("  ML SIGNAL MODEL - TEST-SET EVALUATION")
         print(div)
         print(f"  Test bars          : {metrics['n_test']}")
         print(f"  Base rate (% up)   : {metrics['pos_rate']:.2%}")
@@ -351,7 +351,7 @@ def evaluate(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5 — MLSignalModel: THE PUBLIC API
+# SECTION 5 - MLSignalModel: THE PUBLIC API
 # ─────────────────────────────────────────────────────────────────────────────
 
 class MLSignalModel:
@@ -367,9 +367,9 @@ class MLSignalModel:
     fi      = model.feature_importance(top_n=15)
 
     signal() returns a DataFrame with columns:
-      p_up    — calibrated P(5-day up move) ∈ [0, 1]
-      signal  — +1 (Long) | 0 (Flat) | -1 (Short)
-      regime  — "Long" | "Flat" | "Short"
+      p_up    - calibrated P(5-day up move) ∈ [0, 1]
+      signal  - +1 (Long) | 0 (Flat) | -1 (Short)
+      regime  - "Long" | "Flat" | "Short"
 
     Thresholds
     ──────────
@@ -462,7 +462,7 @@ class MLSignalModel:
         Rows with insufficient indicator history (NaN features) are silently
         dropped; the returned Series index aligns with those clean rows.
 
-        The model never sees the target column — predict_proba operates
+        The model never sees the target column - predict_proba operates
         purely on features.
         """
         self._check_fitted()
@@ -517,7 +517,7 @@ class MLSignalModel:
         Mean impurity-decrease feature importance, averaged across the
         calibration CV folds.
 
-        Returns a Series sorted descending — highest-impact features first.
+        Returns a Series sorted descending - highest-impact features first.
         """
         self._check_fitted()
 
@@ -580,7 +580,7 @@ class MLSignalModel:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 6 — CONVENIENCE FUNCTION
+# SECTION 6 - CONVENIENCE FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_ml_signal(

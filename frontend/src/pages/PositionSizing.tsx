@@ -354,7 +354,7 @@ export default function PositionSizing() {
               <div className="flex items-center gap-2.5 rounded-md border border-accent/30 bg-[rgba(56,139,253,.07)] px-4 py-2.5">
                 <Brain size={14} className="shrink-0 text-accent" />
                 <p className="text-xs text-ink-secondary">
-                  ML signal views applied — return estimates blended{' '}
+                  ML signal views applied - return estimates blended{' '}
                   <span className="font-semibold text-ink-primary">
                     45% regime + 30% momentum + 20% ML
                   </span>{' '}
@@ -394,7 +394,7 @@ export default function PositionSizing() {
               <MetricCard size="sm" label="Annual Return"
                 value={fmtPct(result.metrics.annual_return)}
                 accent={result.metrics.annual_return >= 0 ? 'gain' : 'loss'}
-                tooltip="Expected portfolio return over a full year, blended from HMM regime signal (55%), momentum (35%), and your target return — then shrunk via James-Stein and blended with market equilibrium through Black-Litterman." />
+                tooltip="Expected portfolio return over a full year, blended from HMM regime signal (55%), momentum (35%), and your target return - then shrunk via James-Stein and blended with market equilibrium through Black-Litterman." />
               <MetricCard size="sm" label="Annual Vol"
                 value={fmtPct(result.metrics.annual_vol)}
                 tooltip="Annualised standard deviation of portfolio returns, derived from DCC-GARCH one-step-ahead variance forecasts. Measures how much the portfolio value swings year-to-year." />
@@ -407,7 +407,7 @@ export default function PositionSizing() {
                 tooltip="Parametric Value-at-Risk: the maximum monthly loss you would expect in 19 out of 20 months (95th percentile), computed from GARCH-forecasted volatility scaled to a 21-day horizon." />
               <MetricCard size="sm" label="MC VaR"
                 value={fmtPct(result.metrics.mc_var)} accent="loss"
-                tooltip="Monte Carlo Value-at-Risk at 95% confidence over 21 days. Uses block-bootstrap resampling and a Student-t fit — whichever gives the more conservative (larger loss) estimate is reported." />
+                tooltip="Monte Carlo Value-at-Risk at 95% confidence over 21 days. Uses block-bootstrap resampling and a Student-t fit - whichever gives the more conservative (larger loss) estimate is reported." />
               <MetricCard size="sm" label="MC CVaR"
                 value={fmtPct(result.metrics.mc_cvar)} accent="loss"
                 tooltip="Conditional VaR (Expected Shortfall): the average loss across the worst 5% of 21-day Monte Carlo scenarios. More conservative than VaR because it captures how bad the tail actually is, not just the threshold." />

@@ -6,19 +6,19 @@ GARCH + DCC-GARCH + HMM + Black-Litterman + Ledoit-Wolf MVO
 
 Improvements over previous version
 ------------------------------------
-1. HMM regime smoothing      — EMA over posterior probabilities stops
+1. HMM regime smoothing      - EMA over posterior probabilities stops
                                day-to-day regime flipping; label only
                                changes when smoothed probability holds
                                above a confidence threshold.
-2. James-Stein shrinkage     — raw mean returns shrunk toward the
+2. James-Stein shrinkage     - raw mean returns shrunk toward the
                                cross-sectional grand mean, reducing
                                estimation error significantly.
-3. Ledoit-Wolf covariance    — replaces raw np.cov everywhere;
+3. Ledoit-Wolf covariance    - replaces raw np.cov everywhere;
                                well-conditioned even for small T/n.
-4. Fat-tail Monte Carlo      — portfolio VaR / CVaR estimated by
+4. Fat-tail Monte Carlo      - portfolio VaR / CVaR estimated by
                                bootstrap + Student-t fit rather than
                                normal assumption.
-5. Diversification constraint — hard max_weight = 0.40 per position,
+5. Diversification constraint - hard max_weight = 0.40 per position,
                                 combined with L2 penalty so weights
                                 spread by risk/reward within that cap.
 """
@@ -75,7 +75,7 @@ def fetch_data(tickers: list, period: str = "5y") -> tuple[pd.DataFrame, pd.Data
 
     if log_returns.empty:
         raise ValueError(
-            f"Could not compute returns for {available} — "
+            f"Could not compute returns for {available} - "
             "price series may be too short."
         )
 
