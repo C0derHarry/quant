@@ -1,3 +1,4 @@
+import pandas as pd
 import yfinance as yf
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -189,6 +190,47 @@ def get_index_list():
     try:
         indices = nse.get_index_list()
         return sorted(indices) if isinstance(indices, list) else []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+ASSET_TICKERS = {
+    "NIFTY 50":  "^NSEI",
+    "Gold":      "GOLDBEES.NS",
+    "IT Sector": "^CNXIT",
+    "Banking":   "^NSEBANK",
+    "Midcap":    "^NSEMDCP50",
+    "USD/INR":   "USDINR=X",
+}
+
+PERIOD_MAP = {"1m": "1mo", "3m": "3mo", "6m": "6mo", "1y": "1y", "3y": "3y"}
+
+
+@router.get("/asset-compare")
+def asset_compare(period: str = "1y"):
+    av_period = PERIOD_MAP.get(period, "1y")
+    tickers = list(ASSET_TICKERS.values())
+    try:
+        raw = yf.download(tickers, period=av_period, auto_adjust=True, progress=False)
+        closes = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+        if isinstance(closes, pd.Series):
+            closes = closes.to_frame(tickers[0])
+        result = {}
+        for label, ticker in ASSET_TICKERS.items():
+            col = ticker if ticker in closes.columns else None
+            if col is None:
+                continue
+            series = closes[col].dropna()
+            if series.empty:
+                continue
+            base = float(series.iloc[0])
+            if base == 0:
+                continue
+            result[label] = [
+                {"date": d.strftime("%Y-%m-%d"), "value": round(float(v) / base * 100, 2)}
+                for d, v in series.items()
+            ]
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

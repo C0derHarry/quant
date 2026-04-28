@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import market, screener, fundamentals, volatility, portfolio, signals, news
+from api.routes import market, screener, fundamentals, volatility, portfolio, signals, news, earnings
 
 app = FastAPI(title="QuantHub API", version="1.0.0", docs_url="/api/docs")
 
@@ -24,6 +24,7 @@ app.include_router(volatility.router,   prefix="/api/volatility",   tags=["volat
 app.include_router(portfolio.router,    prefix="/api/portfolio",    tags=["portfolio"])
 app.include_router(signals.router,      prefix="/api/signals",      tags=["signals"])
 app.include_router(news.router,         prefix="/api/news",         tags=["news"])
+app.include_router(earnings.router,     prefix="/api/earnings",     tags=["earnings"])
 
 
 @app.get("/api/health")

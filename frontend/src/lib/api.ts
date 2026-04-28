@@ -63,6 +63,23 @@ export const optimizePortfolio = (body: OptimizeRequest) =>
 export const analyzeSignals = (body: SignalRequest) =>
   request<SignalResult>('/signals/analyze', { method: 'POST', body: JSON.stringify(body) })
 
+// ── Market extras ────────────────────────────────────────────────
+export type AssetCompareResult = Record<string, { date: string; value: number }[]>
+export const getAssetCompare = (period: string) =>
+  request<AssetCompareResult>(`/market/asset-compare?period=${period}`)
+
+// ── Earnings ──────────────────────────────────────────────────────
+export interface EarningsQuarter {
+  quarter: string; actual_eps: number | null; estimated_eps: number | null
+  surprise_pct: number | null; beat: boolean | null
+}
+export interface EarningsSurpriseResult {
+  quarters: EarningsQuarter[]; beat_rate: number | null; avg_surprise_pct: number | null
+  has_estimates: boolean; latest_beat: boolean | null; latest_surprise_pct: number | null
+}
+export const getEarningsSurprise = (ticker: string, quarters = 8) =>
+  request<EarningsSurpriseResult>(`/earnings/surprise?ticker=${encodeURIComponent(ticker)}&quarters=${quarters}`)
+
 // ── News ──────────────────────────────────────────────────────────
 export const getNewsFeed   = (scope: 'national' | 'international', limit = 20) =>
   request<NewsFeed>(`/news/feed?scope=${scope}&limit=${limit}`)

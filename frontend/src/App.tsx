@@ -8,6 +8,7 @@ import VolatilityForecast from './pages/VolatilityForecast'
 import PositionSizing    from './pages/PositionSizing'
 import MLSignals         from './pages/MLSignals'
 import NewsHub           from './pages/NewsHub'
+import EarningsSurprise  from './pages/EarningsSurprise'
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/portfolio"   element={<PositionSizing />} />
         <Route path="/signals"     element={<MLSignals />} />
         <Route path="/news"        element={<NewsHub />} />
+        <Route path="/earnings"    element={<EarningsSurprise />} />
       </Routes>
     </Layout>
   )
