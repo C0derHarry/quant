@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from core.portfolio import run_optimizer
+from core.portfolio.optimization import efficient_frontier, risk_parity, min_variance
 import numpy as np
 import pandas as pd
 
@@ -165,5 +166,89 @@ def optimize(req: OptimizeRequest):
             "dcc_b":         round(float(raw["dcc"]["dcc_b"]), 4),
             "ml_adjusted":   ml_views is not None and len(ml_views) > 0,
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Efficient Frontier ────────────────────────────────────────────────────────
+
+class FrontierRequest(BaseModel):
+    tickers: list[str]
+    period:  str = "3y"
+
+
+@router.post("/frontier")
+def frontier_endpoint(req: FrontierRequest):
+    try:
+        tickers = [t if t.startswith("^") or "." in t else f"{t}.NS" for t in req.tickers]
+        result  = efficient_frontier(tickers, period=req.period)
+        return _safe(result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Risk Parity ───────────────────────────────────────────────────────────────
+
+class RiskParityRequest(BaseModel):
+    tickers:     list[str]
+    capital:     float = 1_000_000
+    stop_loss_k: float = 1.5
+    period:      str   = "3y"
+
+
+@router.post("/risk-parity")
+def risk_parity_endpoint(req: RiskParityRequest):
+    try:
+        tickers = [t if t.startswith("^") or "." in t else f"{t}.NS" for t in req.tickers]
+        rp      = risk_parity(tickers, period=req.period)
+
+        # Build stop table using GARCH sigmas from sizing.py
+        from core.portfolio.sizing import fetch_data, fit_garch_single
+        _, log_rets = fetch_data(tickers, period=req.period)
+
+        import yfinance as yf
+        prices_raw = yf.download(tickers, period="5d", auto_adjust=True, progress=False)["Close"]
+        if isinstance(prices_raw, pd.Series):
+            prices_raw = prices_raw.to_frame(tickers[0])
+        latest_prices = prices_raw.iloc[-1]
+
+        stop_table = []
+        for ticker in tickers:
+            if ticker not in log_rets.columns:
+                continue
+            try:
+                garch = fit_garch_single(log_rets[ticker])
+                sigma = float(garch["sigma_forecast"])
+            except Exception:
+                sigma = float(log_rets[ticker].std())
+
+            w          = rp["weights"].get(ticker, 0.0)
+            entry      = float(latest_prices.get(ticker, 0) or 0)
+            k_adj      = req.stop_loss_k * (1 + 0.3 * abs(w))
+            stop_price = entry * (1 - k_adj * sigma)
+            stop_pct   = k_adj * sigma * 100
+            allocation = w * req.capital
+            shares     = allocation / entry if entry > 0 else 0
+
+            stop_table.append({
+                "ticker":      ticker,
+                "regime":      "—",
+                "weight":      round(w * 100, 2),
+                "allocation":  round(allocation, 0),
+                "shares":      round(shares, 4),
+                "entry_price": round(entry, 2),
+                "stop_price":  round(stop_price, 2),
+                "stop_pct":    round(stop_pct, 3),
+                "daily_sigma": round(sigma * 100, 3),
+                "at_risk":     round(allocation * stop_pct / 100, 0),
+                "is_short":    False,
+            })
+
+        return _safe({
+            "weights":            rp["weights"],
+            "metrics":            rp["metrics"],
+            "risk_contributions": rp["risk_contributions"],
+            "stop_table":         stop_table,
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

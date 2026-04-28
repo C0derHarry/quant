@@ -59,6 +59,46 @@ export const forecastVol = (body: ForecastRequest) =>
 export const optimizePortfolio = (body: OptimizeRequest) =>
   request<OptimizeResult>('/portfolio/optimize', { method: 'POST', body: JSON.stringify(body) })
 
+export interface FrontierPoint { ret: number; vol: number; sharpe: number; weights: Record<string, number> }
+export interface FrontierResult { frontier: FrontierPoint[]; max_sharpe: FrontierPoint; min_var: FrontierPoint }
+export const getEfficientFrontier = (body: { tickers: string[]; period?: string }) =>
+  request<FrontierResult>('/portfolio/frontier', { method: 'POST', body: JSON.stringify(body) })
+
+export interface RiskParityResult {
+  weights: Record<string, number>
+  metrics: { annual_return: number; annual_vol: number; sharpe: number }
+  risk_contributions: Record<string, number>
+  stop_table: StopRow[]
+}
+export const getRiskParity = (body: { tickers: string[]; capital: number; stop_loss_k?: number; period?: string }) =>
+  request<RiskParityResult>('/portfolio/risk-parity', { method: 'POST', body: JSON.stringify(body) })
+
+export interface WalkForwardResult {
+  equity_curve:   { date: string; value: number; benchmark: number }[]
+  window_metrics: { window: number; train_start: string; train_end: string;
+                    test_start: string; test_end: string; sharpe: number; return: number; max_drawdown: number }[]
+  aggregate:      { sharpe: number; annual_return: number; max_drawdown: number; calmar: number; alpha: number }
+  degradation_slope: number
+}
+export const runWalkForward = (body: {
+  tickers: string[]; weights: Record<string, number>; train_months?: number;
+  test_months?: number; n_windows?: number; cost_bps?: number;
+  atr_stop_mult?: number; use_ml?: boolean; use_regimes?: boolean
+}) => request<WalkForwardResult>('/backtest/run', { method: 'POST', body: JSON.stringify(body) })
+
+export interface SensitivityResult {
+  x_param: string; x_values: number[]; y_param: string; y_values: number[]
+  sharpe_grid: number[][]
+}
+export const runSensitivity = (body: { tickers: string[]; weights: Record<string, number>; period?: string }) =>
+  request<SensitivityResult>('/backtest/sensitivity', { method: 'POST', body: JSON.stringify(body) })
+
+export interface RegimeBar { date: string; price: number; regime: string; prob_bull: number; prob_bear: number; prob_sideways: number }
+export interface RegimeStat { regime: string; mean_return: number; vol: number; avg_duration_days: number }
+export interface RegimeTicker { series: RegimeBar[]; state_stats: RegimeStat[]; transition_matrix: number[][] }
+export const getRegimes = (tickers: string[], period = '2y') =>
+  request<Record<string, RegimeTicker>>(`/backtest/regimes?tickers=${tickers.join(',')}&period=${period}`)
+
 // ── Signals ───────────────────────────────────────────────────────
 export const analyzeSignals = (body: SignalRequest) =>
   request<SignalResult>('/signals/analyze', { method: 'POST', body: JSON.stringify(body) })

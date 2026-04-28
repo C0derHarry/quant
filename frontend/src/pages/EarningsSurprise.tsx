@@ -4,7 +4,7 @@ import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ReferenceLine, ResponsiveContainer, Cell,
 } from 'recharts'
-import { CheckCircle, XCircle, Minus } from 'lucide-react'
+import { CheckCircle, XCircle, Minus, X } from 'lucide-react'
 import StockBrowser from '../components/ui/StockBrowser'
 import MetricCard from '../components/ui/MetricCard'
 import { PageLoader, ErrorState } from '../components/ui/Spinner'
@@ -238,7 +238,11 @@ export default function EarningsSurprise() {
     : 'neutral'
 
   return (
-    <div className="flex h-[calc(100vh-104px)] gap-5 animate-fade-up">
+    <div className="flex flex-col h-[calc(100vh-104px)] gap-4 animate-fade-up">
+      <p className="text-xs text-ink-muted shrink-0">
+        <span className="font-semibold text-ink-secondary">EPS (Earnings Per Share)</span> — net profit divided by shares outstanding. Comparing reported EPS against analyst estimates shows whether a company surprised the market.
+      </p>
+    <div className="flex flex-1 gap-5 min-h-0">
       {/* Left: stock selector */}
       <StockBrowser
         selected={selected}
@@ -249,6 +253,22 @@ export default function EarningsSurprise() {
 
       {/* Right: content */}
       <div className="flex-1 overflow-y-auto space-y-5 pr-1">
+        {ticker && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-ink-muted">Viewing earnings for</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-0.5 text-xs font-semibold text-accent">
+              {ticker}
+              <button
+                onClick={() => setSelected([])}
+                className="ml-0.5 rounded-full p-0.5 hover:bg-accent/20 transition-colors"
+                title="Clear selection"
+              >
+                <X size={10} />
+              </button>
+            </span>
+          </div>
+        )}
+
         {!ticker && (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
@@ -324,6 +344,7 @@ export default function EarningsSurprise() {
           </>
         )}
       </div>
+    </div>
     </div>
   )
 }

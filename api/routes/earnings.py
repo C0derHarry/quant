@@ -19,18 +19,18 @@ def earnings_surprise(ticker: str, quarters: int = 8):
     stock = yf.Ticker(ns)
     rows = []
 
-    # Primary: earnings_dates has EPS estimates + actuals + surprise %
+    # Primary: earnings_history has epsActual, epsEstimate, surprisePercent
     try:
-        ed = stock.earnings_dates
-        if ed is not None and not ed.empty:
-            tz = ed.index.tz
-            now = pd.Timestamp.now(tz=tz)
-            past = ed[ed.index < now].dropna(subset=["Reported EPS"]).head(quarters)
+        eh = stock.earnings_history
+        if eh is not None and not eh.empty:
+            now  = pd.Timestamp.now()
+            past = eh[eh.index <= now].sort_index(ascending=False).head(quarters)
             for date, row in past.iterrows():
-                actual = _safe_float(row.get("Reported EPS"))
-                est    = _safe_float(row.get("EPS Estimate"))
-                surp   = _safe_float(row.get("Surprise(%)"))
-                beat   = (actual >= est) if (actual is not None and est is not None) else None
+                actual   = _safe_float(row.get("epsActual"))
+                est      = _safe_float(row.get("epsEstimate"))
+                surp_raw = _safe_float(row.get("surprisePercent"))
+                surp     = round(surp_raw * 100, 2) if surp_raw is not None else None
+                beat     = (actual >= est) if (actual is not None and est is not None) else None
                 rows.append({
                     "quarter":       date.strftime("%b '%y"),
                     "actual_eps":    actual,
@@ -41,15 +41,15 @@ def earnings_surprise(ticker: str, quarters: int = 8):
     except Exception:
         pass
 
-    # Fallback: derive EPS from quarterly net income + shares outstanding
+    # Fallback: derive EPS from quarterly income stmt + shares outstanding
     if not rows:
         try:
-            qf = stock.quarterly_financials
-            ni_key = next((k for k in qf.index if "Net Income" in str(k)), None)
+            qi     = stock.quarterly_income_stmt
+            ni_key = next((k for k in qi.index if "Net Income" in str(k)), None)
             info   = stock.info
             shares = info.get("sharesOutstanding") or info.get("impliedSharesOutstanding")
             if ni_key and shares:
-                for date, val in list(qf.loc[ni_key].items())[:quarters]:
+                for date, val in list(qi.loc[ni_key].items())[:quarters]:
                     if pd.notna(val):
                         rows.append({
                             "quarter":       date.strftime("%b '%y"),
