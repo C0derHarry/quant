@@ -2,10 +2,14 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import market, screener, fundamentals, volatility, portfolio, signals, news, earnings, backtest
+from api.routes import user_portfolios, tracker
 
 app = FastAPI(title="QuantHub API", version="1.0.0", docs_url="/api/docs")
 
@@ -25,7 +29,9 @@ app.include_router(portfolio.router,    prefix="/api/portfolio",    tags=["portf
 app.include_router(signals.router,      prefix="/api/signals",      tags=["signals"])
 app.include_router(news.router,         prefix="/api/news",         tags=["news"])
 app.include_router(earnings.router,     prefix="/api/earnings",     tags=["earnings"])
-app.include_router(backtest.router,     prefix="/api/backtest",     tags=["backtest"])
+app.include_router(backtest.router,          prefix="/api/backtest",     tags=["backtest"])
+app.include_router(user_portfolios.router,   prefix="/api/portfolios",   tags=["portfolios"])
+app.include_router(tracker.router,           prefix="/api/tracker",      tags=["tracker"])
 
 
 @app.get("/api/health")

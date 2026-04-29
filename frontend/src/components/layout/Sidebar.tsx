@@ -1,25 +1,28 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   BarChart2, TrendingUp, Search, Activity, Sliders,
-  ChevronRight, Layers, Home, Brain, Newspaper, Award,
+  ChevronRight, Layers, Home, Brain, Newspaper, Award, LineChart, LogOut,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
+import { useAuth } from '../../contexts/AuthContext'
 
 const NAV = [
-  { label: 'Overview',   path: '/',            icon: Home,      section: 'MARKET' },
-  { label: 'Value Screen', path: '/value',      icon: Search,    section: 'RESEARCH' },
+  { label: 'Overview',    path: '/',            icon: Home,      section: 'MARKET' },
+  { label: 'Value Screen', path: '/value',       icon: Search,    section: 'RESEARCH' },
   { label: 'Deep Dive',   path: '/fundamentals', icon: BarChart2, section: 'RESEARCH' },
   { label: 'Earnings',    path: '/earnings',     icon: Award,     section: 'RESEARCH' },
-  { label: 'Volatility', path: '/volatility',   icon: Activity,  section: 'ANALYTICS' },
-  { label: 'ML Signals', path: '/signals',      icon: Brain,     section: 'ANALYTICS' },
-  { label: 'Portfolio',  path: '/portfolio',    icon: Sliders,    section: 'ANALYTICS' },
-  { label: 'News Hub',   path: '/news',          icon: Newspaper,  section: 'NEWS' },
+  { label: 'Volatility',  path: '/volatility',  icon: Activity,  section: 'ANALYTICS' },
+  { label: 'ML Signals',  path: '/signals',     icon: Brain,     section: 'ANALYTICS' },
+  { label: 'Portfolio',   path: '/portfolio',   icon: Sliders,   section: 'ANALYTICS' },
+  { label: 'Tracker',     path: '/tracker',     icon: LineChart, section: 'ANALYTICS' },
+  { label: 'News Hub',    path: '/news',        icon: Newspaper, section: 'NEWS' },
 ]
 
 const SECTIONS = ['MARKET', 'RESEARCH', 'ANALYTICS', 'NEWS']
 
 export default function Sidebar() {
   const { pathname } = useLocation()
+  const { user, logout } = useAuth()
 
   return (
     <aside className="fixed inset-y-0 left-0 z-30 flex w-[220px] flex-col border-r border-border bg-bg-surface">
@@ -77,14 +80,20 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Footer */}
+      {/* Footer: user + logout */}
       <div className="border-t border-border px-4 py-3">
-        <p className="text-2xs text-ink-disabled">
-          NSE · BSE · Real-time
-        </p>
-        <p className="text-2xs text-ink-disabled opacity-60">
-          v0.1.0 · India Markets
-        </p>
+        {user && (
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-2xs text-ink-secondary">{user.email}</p>
+            <button onClick={logout}
+              className="shrink-0 text-ink-disabled transition-colors hover:text-loss"
+              title="Sign out">
+              <LogOut size={13} />
+            </button>
+          </div>
+        )}
+        <p className="text-2xs text-ink-disabled">NSE · BSE · Real-time</p>
+        <p className="text-2xs text-ink-disabled opacity-60">v0.1.0 · India Markets</p>
       </div>
     </aside>
   )

@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   optimizePortfolio, getRiskParity, getEfficientFrontier, runWalkForward,
-  runSensitivity, getRegimes,
+  runSensitivity, getRegimes, savePortfolio, saveBacktestResult,
   type OptimizeResult, type StopRow, type RegimeWarning, type DCARow,
   type RiskParityResult, type FrontierResult, type WalkForwardResult,
   type SensitivityResult, type RegimeBar, type RegimeStat,
@@ -16,7 +16,7 @@ import DataTable, { Column } from '../components/ui/DataTable'
 import StockBrowser from '../components/ui/StockBrowser'
 import {
   X, AlertTriangle, Play, Layers, ChevronDown, Brain,
-  TrendingUp, TrendingDown, Activity, BarChart2,
+  TrendingUp, TrendingDown, Activity, BarChart2, BookmarkCheck, Save,
 } from 'lucide-react'
 import { cn, fmt, fmtPct, fmtCurrency } from '../lib/utils'
 import {
@@ -444,12 +444,26 @@ export default function PositionSizing() {
   })
   const btMut = useMutation({
     mutationFn: runWalkForward,
-    onSuccess:  d => setBtResult(d),
+    onSuccess:  d => {
+      setBtResult(d)
+      if (savedPortfolioId) saveBtMut.mutate({ id: savedPortfolioId, r: d })
+    },
   })
   const sensMut = useMutation({
     mutationFn: runSensitivity,
     onSuccess:  d => setSensResult(d),
   })
+
+  // ── Save state ────────────────────────────────────────────────────
+  const [saveName, setSaveName]         = useState('')
+  const [savedPortfolioId, setSavedId]  = useState<string | null>(null)
+
+  const saveMut = useMutation({
+    mutationFn: savePortfolio,
+    onSuccess:  d => setSavedId(d.id),
+  })
+
+  const saveBtMut = useMutation({ mutationFn: ({ id, r }: { id: string; r: unknown }) => saveBacktestResult(id, r) })
 
   // ── Regime query ──────────────────────────────────────────────────
   const { data: regimeData, isLoading: regimeLoading, error: regimeError } = useQuery({
@@ -860,6 +874,42 @@ export default function PositionSizing() {
                 <span className="num font-mono text-xs text-ink-secondary">β = {msResult.dcc_b.toFixed(4)}</span>
               </div>
             )}
+
+            {/* Save portfolio */}
+            <div className="flex items-center gap-3 rounded-lg border border-border bg-bg-surface px-4 py-3">
+              {savedPortfolioId ? (
+                <div className="flex items-center gap-2 text-gain">
+                  <BookmarkCheck size={14} />
+                  <span className="text-xs font-semibold">Saved to your Tracker</span>
+                </div>
+              ) : (
+                <>
+                  <Save size={14} className="shrink-0 text-ink-muted" />
+                  <input
+                    value={saveName} onChange={e => setSaveName(e.target.value)}
+                    placeholder="Portfolio name…"
+                    className="flex-1 bg-transparent text-sm text-ink-primary outline-none placeholder:text-ink-disabled"
+                  />
+                  <button
+                    disabled={!saveName.trim() || saveMut.isPending}
+                    onClick={() => saveMut.mutate({
+                      name:            saveName.trim(),
+                      tickers:         selected,
+                      weights:         currentWeights ?? {},
+                      capital,
+                      portfolio_type:  portfolioType,
+                      optimize_result: (msResult ?? rpResult ?? undefined) as any,
+                    })}
+                    className="shrink-0 rounded border border-accent bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-all hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {saveMut.isPending ? 'Saving…' : 'Save'}
+                  </button>
+                </>
+              )}
+              {saveMut.isError && (
+                <span className="text-xs text-loss">{(saveMut.error as Error).message}</span>
+              )}
+            </div>
 
             {/* Efficient Frontier chart */}
             {frontierResult && (
