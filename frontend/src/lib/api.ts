@@ -1,8 +1,17 @@
+import { supabase } from './supabase'
+
 const BASE = '/api'
 
+async function authHeader(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+  const auth = await authHeader()
+  const res  = await fetch(`${BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...auth, ...init?.headers },
     ...init,
   })
   if (!res.ok) {
@@ -226,6 +235,56 @@ export interface RegimeWarning {
   ticker: string; current: string; shift_to: string; probability: number
 }
 export interface DCARow { Month: string; 'Deploy (Rs)': number; [ticker: string]: number | string }
+
+// ── User Portfolios ───────────────────────────────────────────────
+export interface SavedPortfolio {
+  id:             string
+  name:           string
+  tickers:        string[]
+  weights:        Record<string, number>
+  capital:        number | null
+  portfolio_type: string | null
+  invested_at:    string
+  created_at:     string
+}
+
+export interface SavePortfolioBody {
+  name:            string
+  tickers:         string[]
+  weights:         Record<string, number>
+  capital?:        number
+  portfolio_type?: string
+  optimize_result?: Record<string, unknown>
+}
+
+export const listPortfolios  = () =>
+  request<SavedPortfolio[]>('/portfolios')
+export const savePortfolio   = (body: SavePortfolioBody) =>
+  request<SavedPortfolio>('/portfolios', { method: 'POST', body: JSON.stringify(body) })
+export const deletePortfolio = (id: string) =>
+  request<{ ok: boolean }>(`/portfolios/${id}`, { method: 'DELETE' })
+export const saveBacktestResult = (portfolioId: string, result: unknown) =>
+  request<{ ok: boolean }>(`/portfolios/${portfolioId}/backtest`,
+    { method: 'POST', body: JSON.stringify(result) })
+
+// ── Tracker ───────────────────────────────────────────────────────
+export interface TrackerSeries { date: string; portfolio: number; benchmark: number | null }
+export interface TrackerMetrics {
+  total_return: number; cagr: number; annual_vol: number
+  sharpe: number; max_drawdown: number; days_held: number
+}
+export interface TickerPerf { ticker: string; return: number; weight: number }
+export interface TrackerResult {
+  portfolio_name:     string
+  invested_at:        string
+  tickers:            string[]
+  series:             TrackerSeries[]
+  metrics:            TrackerMetrics
+  ticker_performance: TickerPerf[]
+}
+
+export const getTrackerData = (portfolioId: string) =>
+  request<TrackerResult>(`/tracker/${portfolioId}`)
 
 export interface NewsArticle {
   id: string; title: string; summary: string; url: string; source: string
