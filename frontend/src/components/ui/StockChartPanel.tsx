@@ -76,27 +76,19 @@ export default function StockChartPanel({ stock, onClose }: Props) {
     return rows.map(r => ({ t: formatLabel(r.date, period), close: r.close }))
   }, [ohlcvRaw, stock.symbol, period])
 
-  // Period-aware change: compute from first→last close in chartData for non-1D
+  // displayPrice is always stock.price (live market value) so it never flashes
+  // or shifts when switching periods. Change is computed from chartData[0] → stock.price
+  // so the delta correctly reflects the selected period window.
   const { displayChange, displayPct, displayPrice } = useMemo(() => {
+    const last = stock.price
     if (chartData.length === 0) {
-      return {
-        displayChange: stock.change,
-        displayPct:    stock.pct_change,
-        displayPrice:  stock.price,
-      }
+      return { displayChange: stock.change, displayPct: stock.pct_change, displayPrice: last }
     }
-    const last  = chartData[chartData.length - 1].close
-    const first = chartData[0].close
-    if (period === '1D') {
-      // 1D: use first bar of the day as reference (open proxy)
-      const change = last - first
-      const pct    = first !== 0 ? (change / first) * 100 : 0
-      return { displayChange: change, displayPct: pct, displayPrice: last }
-    }
+    const first  = chartData[0].close
     const change = last - first
     const pct    = first !== 0 ? (change / first) * 100 : 0
     return { displayChange: change, displayPct: pct, displayPrice: last }
-  }, [chartData, period, stock])
+  }, [chartData, stock])
 
   const up    = displayPct >= 0
   const color = up ? '#3FB950' : '#F85149'
