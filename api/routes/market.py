@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from nsetools import Nse
 from concurrent.futures import ThreadPoolExecutor
+from core.data.groww_client import GrowwError, GROWW_SNAPSHOTS, get_groww_client, ticker_snapshot_from_quote
 
 router   = APIRouter()
 nse      = Nse()
@@ -49,12 +50,29 @@ def _ticker_snapshot(ticker: str) -> dict:
     }
 
 
+def _groww_snapshot(name: str) -> dict:
+    """Real-time snapshot from Groww Quote API. Raises GrowwError on failure."""
+    exchange, segment, symbol = GROWW_SNAPSHOTS[name]
+    payload = get_groww_client().get_quote(trading_symbol=symbol, exchange=exchange, segment=segment)
+    return ticker_snapshot_from_quote(payload)
+
+
+def _snapshot(name: str, yf_ticker: str) -> dict:
+    """Groww-first snapshot with automatic yfinance fallback."""
+    if name in GROWW_SNAPSHOTS:
+        try:
+            return _groww_snapshot(name)
+        except GrowwError:
+            pass
+    return _ticker_snapshot(yf_ticker)
+
+
 @router.get("/indices")
 def get_indices():
     results = {}
     for name, ticker in INDICES.items():
         try:
-            results[name] = _ticker_snapshot(ticker)
+            results[name] = _snapshot(name, ticker)
         except Exception:
             pass
     return results
@@ -65,7 +83,7 @@ def get_sectors():
     results = {}
     for name, ticker in SECTORS.items():
         try:
-            results[name] = _ticker_snapshot(ticker)
+            results[name] = _snapshot(name, ticker)
         except Exception:
             pass
     return results
