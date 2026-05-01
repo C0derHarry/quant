@@ -37,6 +37,8 @@ export const getStockNames = (symbols: string[]) =>
 export const getIndexList  = () => request<string[]>('/market/index-list')
 export const getIndexStocks = (name: string) =>
   request<SectorStock[]>(`/market/index/${encodeURIComponent(name)}/stocks`)
+export const getMarketStatus = () =>
+  request<{ is_open: boolean; is_trading_day: boolean }>('/market/status')
 
 // ── Screener ──────────────────────────────────────────────────────
 export const runMagicFormula = (tickers: string[]) =>

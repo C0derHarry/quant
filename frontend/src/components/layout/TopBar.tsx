@@ -1,5 +1,6 @@
 import { useLocation } from 'react-router-dom'
-import { isMarketOpen } from '../../lib/utils'
+import { useQuery } from '@tanstack/react-query'
+import { getMarketStatus } from '../../lib/api'
 
 const TITLES: Record<string, string> = {
   '/':              'Market Overview',
@@ -19,8 +20,16 @@ function getTitleForPath(pathname: string): string {
 
 export default function TopBar() {
   const { pathname } = useLocation()
-  const open  = isMarketOpen()
   const title = getTitleForPath(pathname)
+
+  const { data } = useQuery({
+    queryKey:  ['market-status'],
+    queryFn:   getMarketStatus,
+    staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
+  })
+
+  const open = data?.is_open ?? false
 
   return (
     <header className="fixed top-0 right-0 left-[220px] z-20 flex h-[56px] items-center justify-between border-b border-border bg-bg-surface/90 px-6 backdrop-blur-sm">

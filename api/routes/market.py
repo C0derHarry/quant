@@ -1,12 +1,16 @@
 import pandas as pd
 import yfinance as yf
+import pandas_market_calendars as mcal
+from datetime import datetime, time, timedelta, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from nsetools import Nse
 from concurrent.futures import ThreadPoolExecutor
 
-router = APIRouter()
-nse    = Nse()
+router   = APIRouter()
+nse      = Nse()
+_nse_cal = mcal.get_calendar('NSE')
+_IST     = timezone(timedelta(hours=5, minutes=30))
 
 INDICES = {
     "NIFTY 50":   "^NSEI",
@@ -79,7 +83,7 @@ def get_sector_stocks(sector_name: str):
         try:
             rows.append({
                 "symbol":     s.get("symbol", ""),
-                "name":       s.get("meta", {}).get("companyName", ""),
+                "name":       s.get("meta", {}).get("companyName", "").title(),
                 "price":      float(s.get("lastPrice", 0)),
                 "change":     float(s.get("change", 0)),
                 "pct_change": float(s.get("pChange", 0)),
@@ -108,7 +112,7 @@ def _fetch_name_map() -> dict[str, str]:
         try:
             rows = nse.get_stock_quote_in_index(idx)
             return {
-                r["symbol"]: r.get("meta", {}).get("companyName", "")
+                r["symbol"]: r.get("meta", {}).get("companyName", "").title()
                 for r in rows if r.get("symbol")
             }
         except Exception:
@@ -159,7 +163,7 @@ def get_sector_symbols(sector_name: str):
     return [
         {
             "symbol": s.get("symbol", ""),
-            "name":   s.get("meta", {}).get("companyName", s.get("symbol", "")),
+            "name":   s.get("meta", {}).get("companyName", s.get("symbol", "")).title(),
         }
         for s in raw
         if s.get("symbol")
@@ -173,7 +177,8 @@ class SymbolList(BaseModel):
 def _fetch_name(symbol: str) -> tuple[str, str]:
     suffix = ".NS" if not symbol.endswith((".NS", ".BO")) else ""
     try:
-        return symbol, yf.Ticker(f"{symbol}{suffix}").info.get("shortName", symbol)
+        name = yf.Ticker(f"{symbol}{suffix}").info.get("shortName", symbol)
+        return symbol, name.title() if isinstance(name, str) else symbol
     except Exception:
         return symbol, symbol
 
@@ -183,6 +188,19 @@ def get_stock_names(body: SymbolList):
     with ThreadPoolExecutor(max_workers=10) as ex:
         results = dict(ex.map(_fetch_name, body.symbols))
     return results
+
+
+@router.get("/status")
+def get_market_status():
+    now  = datetime.now(_IST)
+    date = now.date().strftime("%Y-%m-%d")
+    try:
+        schedule = _nse_cal.schedule(start_date=date, end_date=date)
+        is_trading_day = not schedule.empty
+    except Exception:
+        is_trading_day = now.weekday() < 5
+    is_open = is_trading_day and time(9, 15) <= now.time() <= time(15, 30)
+    return {"is_open": is_open, "is_trading_day": is_trading_day}
 
 
 @router.get("/index-list")
@@ -246,7 +264,7 @@ def get_index_stocks(index_name: str):
         try:
             rows.append({
                 "symbol":     s.get("symbol", ""),
-                "name":       s.get("meta", {}).get("companyName", ""),
+                "name":       s.get("meta", {}).get("companyName", "").title(),
                 "price":      float(s.get("lastPrice", 0)),
                 "change":     float(s.get("change", 0)),
                 "pct_change": float(s.get("pChange", 0)),

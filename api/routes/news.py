@@ -5,6 +5,7 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 import requests
+import pandas_market_calendars as mcal
 from fastapi import APIRouter, HTTPException
 
 router = APIRouter()
@@ -23,14 +24,19 @@ TOPIC_MAP = {
     "international": "technology,financial_markets,earnings,mergers_and_acquisitions",
 }
 
-IST = timezone(timedelta(hours=5, minutes=30))
+IST      = timezone(timedelta(hours=5, minutes=30))
+_nse_cal = mcal.get_calendar('NSE')
 
 
 def _is_market_open() -> bool:
-    now = datetime.now(IST)
-    if now.weekday() >= 5:
-        return False
-    return time(9, 15) <= now.time() <= time(15, 30)
+    now  = datetime.now(IST)
+    date = now.date().strftime("%Y-%m-%d")
+    try:
+        schedule = _nse_cal.schedule(start_date=date, end_date=date)
+        is_trading_day = not schedule.empty
+    except Exception:
+        is_trading_day = now.weekday() < 5
+    return is_trading_day and time(9, 15) <= now.time() <= time(15, 30)
 
 
 def _cache_path(key: str, bucket_minutes: int = 60) -> Path:
