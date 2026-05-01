@@ -17,11 +17,14 @@ def get_tracker(portfolio_id: str, auth: AuthUser = Depends(get_current_user)):
     data          = port.data
     tickers: list = data["tickers"]
     weights: dict = data["weights"]
-    start_date    = pd.Timestamp(data["invested_at"]).tz_localize(None).normalize()
+    invested_at   = data.get("invested_at") or data.get("created_at")
+    if not invested_at:
+        raise HTTPException(status_code=400, detail="Portfolio has no investment date.")
+    start_date    = pd.Timestamp(invested_at).tz_localize(None).normalize()
     end_date      = pd.Timestamp.utcnow().tz_localize(None).normalize()
 
     if (end_date - start_date).days < 1:
-        return {"message": "Portfolio was just created — check back tomorrow for performance data."}
+        raise HTTPException(status_code=400, detail="Portfolio was just created — check back tomorrow for performance data.")
 
     # Fetch prices + NIFTY 50 benchmark
     all_tickers = list(tickers) + ["^NSEI"]

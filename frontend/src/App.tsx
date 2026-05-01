@@ -1,7 +1,30 @@
+import { Component, type ReactNode } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute    from './components/ProtectedRoute'
 import Layout            from './components/layout/Layout'
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-bg-base p-8 text-center">
+          <p className="text-sm font-semibold text-loss">Render Error</p>
+          <p className="max-w-xl text-xs text-ink-muted">{(this.state.error as Error).message}</p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="mt-2 rounded border border-border px-3 py-1.5 text-xs text-ink-secondary hover:text-ink-primary"
+          >
+            Retry
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 import Login             from './pages/Login'
 import Register          from './pages/Register'
 import MarketOverview    from './pages/MarketOverview'
@@ -18,6 +41,7 @@ import TechnicalAnalysis from './pages/TechnicalAnalysis'
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <AuthProvider>
       <Routes>
         {/* Public routes */}
@@ -42,5 +66,6 @@ export default function App() {
         </Route>
       </Routes>
     </AuthProvider>
+    </ErrorBoundary>
   )
 }
