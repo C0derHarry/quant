@@ -280,7 +280,7 @@ function NewsTickerSearch({
   const [open,  setOpen]  = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  const { data: allSymbols } = useQuery({
+  const { data: allSymbols, isLoading: loadingSymbols } = useQuery({
     queryKey:  ['symbols'],
     queryFn:   () => getAllSymbols('NSE'),
     staleTime: Infinity,
@@ -290,7 +290,7 @@ function NewsTickerSearch({
     if (!query.trim() || !allSymbols) return []
     const q = query.toUpperCase()
     return allSymbols
-      .filter(s => s.symbol.includes(q) || s.name.toUpperCase().includes(q))
+      .filter(s => s.symbol.toUpperCase().includes(q) || s.name.toUpperCase().includes(q))
       .slice(0, 8)
   }, [query, allSymbols])
 
@@ -311,13 +311,15 @@ function NewsTickerSearch({
     </div>
   )
 
+  const showDropdown = open && query.trim().length > 0
+
   return (
     <div ref={ref} className="relative max-w-xs flex-1">
       <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-disabled" />
       <input
         value={query}
         onChange={e => { setQuery(e.target.value); setOpen(true) }}
-        onFocus={() => query && setOpen(true)}
+        onFocus={() => setOpen(true)}
         placeholder="Search stocks (e.g. TCS, Reliance…)"
         className="w-full rounded border border-border bg-bg-elevated py-2 pl-7 pr-3 text-xs text-ink-primary placeholder:text-ink-disabled focus:border-accent focus:outline-none"
       />
@@ -329,25 +331,36 @@ function NewsTickerSearch({
           <X size={11} />
         </button>
       )}
-      {open && filtered.length > 0 && (
+      {showDropdown && (
         <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-md border border-border bg-bg-surface shadow-card-lg">
-          {filtered.map(s => (
-            <button
-              key={s.symbol}
-              onMouseDown={e => {
-                e.preventDefault()
-                onSelect(s.symbol)
-                setQuery('')
-                setOpen(false)
-              }}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-bg-elevated"
-            >
-              <span className="w-20 shrink-0 font-mono text-xs font-semibold text-ink-primary">
-                {s.symbol}
-              </span>
-              <span className="truncate text-xs text-ink-muted">{s.name}</span>
-            </button>
-          ))}
+          {loadingSymbols ? (
+            <div className="flex items-center gap-2 px-3 py-2.5 text-xs text-ink-muted">
+              <Spinner size={12} />
+              Loading NSE stocks…
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="px-3 py-2.5 text-xs text-ink-muted">
+              No matches for "{query}"
+            </div>
+          ) : (
+            filtered.map(s => (
+              <button
+                key={s.symbol}
+                onMouseDown={e => {
+                  e.preventDefault()
+                  onSelect(s.symbol)
+                  setQuery('')
+                  setOpen(false)
+                }}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-bg-elevated"
+              >
+                <span className="w-20 shrink-0 font-mono text-xs font-semibold text-ink-primary">
+                  {s.symbol}
+                </span>
+                <span className="truncate text-xs text-ink-muted">{s.name}</span>
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>
