@@ -181,6 +181,11 @@ def _normalize_mx(item: dict) -> dict:
     }
 
 
+def _mx_after(days: int) -> str:
+    dt = datetime.utcnow() - timedelta(days=days)
+    return dt.strftime("%Y-%m-%dT%H:%M")
+
+
 def _fetch_mx(params: dict, limit: int = 20) -> list[dict]:
     full_params = {
         "api_token":       MARKETAUX_KEY,
@@ -194,7 +199,9 @@ def _fetch_mx(params: dict, limit: int = 20) -> list[dict]:
     data = resp.json()
     if "error" in data:
         raise ValueError(data["error"].get("message", "Marketaux API error"))
-    return [_normalize_mx(item) for item in data.get("data", [])]
+    items = [_normalize_mx(item) for item in data.get("data", [])]
+    items.sort(key=lambda x: x["published_at"], reverse=True)
+    return items
 
 
 def _is_indian_ticker(raw: str) -> bool:
@@ -214,7 +221,7 @@ def get_feed(scope: str = "national", limit: int = 20):
 
     try:
         if scope == "national":
-            articles = _fetch_mx({"countries": "in"}, limit=limit)
+            articles = _fetch_mx({"countries": "in", "published_after": _mx_after(10)}, limit=limit)
         else:
             articles = _fetch_av({
                 "function": "NEWS_SENTIMENT",
@@ -241,7 +248,7 @@ def get_stock_news(ticker: str, limit: int = 10):
 
     try:
         if is_indian:
-            articles = _fetch_mx({"symbols": clean}, limit=limit)
+            articles = _fetch_mx({"symbols": clean, "published_after": _mx_after(60)}, limit=limit)
         else:
             articles = _fetch_av({
                 "function": "NEWS_SENTIMENT",
@@ -275,7 +282,7 @@ def get_portfolio_news(tickers: str, limit: int = 15):
         return {**cached, "cached": True}
 
     try:
-        articles = _fetch_mx({"symbols": ",".join(clean_list)}, limit=limit)
+        articles = _fetch_mx({"symbols": ",".join(clean_list), "published_after": _mx_after(60)}, limit=limit)
 
         ticker_scores: dict[str, list[float]] = {t: [] for t in clean_list}
         for art in articles:
