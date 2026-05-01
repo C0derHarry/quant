@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ExternalLink, Search, X, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { ExternalLink, TrendingUp, TrendingDown, Minus, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { cn } from '../lib/utils'
 import { getNewsFeed, getStockNews, getNewsImpact, NewsArticle, ImpactData } from '../lib/api'
 import Spinner, { PageLoader, ErrorState } from '../components/ui/Spinner'
+import StockSearchInput from '../components/ui/StockSearchInput'
 
 // ── helpers ───────────────────────────────────────────────────────
 
@@ -343,6 +344,7 @@ export default function NewsHub() {
           ))}
         </div>
 
+<<<<<<< Updated upstream
         {/* ticker filter */}
         <div className="relative flex-1 max-w-xs">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-disabled" />
@@ -361,6 +363,14 @@ export default function NewsHub() {
             </button>
           )}
         </div>
+=======
+        {/* stock search dropdown */}
+        <StockSearchInput
+          selected={stockTicker}
+          onSelect={setTicker}
+          onClear={() => setTicker('')}
+        />
+>>>>>>> Stashed changes
 
         {/* topic chips */}
         <div className="flex flex-wrap gap-1.5">
