@@ -269,16 +269,10 @@ function ArticleModal({
 // ── main page ─────────────────────────────────────────────────────
 
 export default function NewsHub() {
-  const [scope,           setScope]    = useState<'national' | 'international'>('national')
-  const [tickerInput,     setInput]    = useState('')
-  const [debouncedTicker, setDebounced] = useState('')
-  const [topicFilter,     setTopic]    = useState<string | null>(null)
-  const [selected,        setSelected] = useState<NewsArticle | null>(null)
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(tickerInput.trim().toUpperCase()), 400)
-    return () => clearTimeout(t)
-  }, [tickerInput])
+  const [scope,       setScope]    = useState<'national' | 'international'>('national')
+  const [stockTicker, setTicker]   = useState('')
+  const [topicFilter, setTopic]    = useState<string | null>(null)
+  const [selected,    setSelected] = useState<NewsArticle | null>(null)
 
   const feedQuery = useQuery({
     queryKey: ['news-feed', scope],
@@ -287,9 +281,9 @@ export default function NewsHub() {
   })
 
   const stockQuery = useQuery({
-    queryKey: ['news-stock', debouncedTicker],
-    queryFn:  () => getStockNews(debouncedTicker),
-    enabled:  !!debouncedTicker,
+    queryKey: ['news-stock', stockTicker],
+    queryFn:  () => getStockNews(stockTicker),
+    enabled:  !!stockTicker,
     staleTime: 15 * 60_000,
   })
 
@@ -301,9 +295,9 @@ export default function NewsHub() {
     staleTime: 5 * 60_000,
   })
 
-  const isLoading = debouncedTicker ? stockQuery.isLoading : feedQuery.isLoading
-  const error     = debouncedTicker ? stockQuery.error     : feedQuery.error
-  const rawArticles = (debouncedTicker ? stockQuery.data : feedQuery.data)?.articles ?? []
+  const isLoading = stockTicker ? stockQuery.isLoading : feedQuery.isLoading
+  const error     = stockTicker ? stockQuery.error     : feedQuery.error
+  const rawArticles = (stockTicker ? stockQuery.data : feedQuery.data)?.articles ?? []
   const articles = topicFilter
     ? rawArticles.filter(a => a.topics.some(t => t.topic === topicFilter))
     : rawArticles
@@ -311,7 +305,7 @@ export default function NewsHub() {
   const handleScopeChange = useCallback((s: 'national' | 'international') => {
     setScope(s)
     setTopic(null)
-    setInput('')
+    setTicker('')
   }, [])
 
   return (
@@ -344,33 +338,12 @@ export default function NewsHub() {
           ))}
         </div>
 
-<<<<<<< Updated upstream
-        {/* ticker filter */}
-        <div className="relative flex-1 max-w-xs">
-          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-disabled" />
-          <input
-            value={tickerInput}
-            onChange={e => setInput(e.target.value)}
-            placeholder="Filter by ticker (e.g. AAPL, INFY)"
-            className="w-full rounded border border-border bg-bg-elevated py-2 pl-7 pr-3 text-xs text-ink-primary placeholder:text-ink-disabled focus:border-accent focus:outline-none"
-          />
-          {tickerInput && (
-            <button
-              onClick={() => setInput('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-disabled hover:text-ink-primary"
-            >
-              <X size={11} />
-            </button>
-          )}
-        </div>
-=======
         {/* stock search dropdown */}
         <StockSearchInput
           selected={stockTicker}
           onSelect={setTicker}
           onClear={() => setTicker('')}
         />
->>>>>>> Stashed changes
 
         {/* topic chips */}
         <div className="flex flex-wrap gap-1.5">
@@ -403,8 +376,8 @@ export default function NewsHub() {
       {error     && <ErrorState message={(error as Error).message} />}
       {!isLoading && !error && articles.length === 0 && (
         <div className="py-20 text-center text-sm text-ink-muted">
-          {debouncedTicker
-            ? `No news found for "${debouncedTicker}" - try a US-listed ticker (e.g. AAPL, INFY)`
+          {stockTicker
+            ? `No news found for "${stockTicker}" - try a different ticker`
             : 'No articles found for this filter.'}
         </div>
       )}

@@ -10,19 +10,11 @@ const NAV = [
   { label: 'Value Screen', path: '/value',      icon: Search,    section: 'RESEARCH' },
   { label: 'Deep Dive',   path: '/fundamentals', icon: BarChart2, section: 'RESEARCH' },
   { label: 'Earnings',    path: '/earnings',     icon: Award,     section: 'RESEARCH' },
-<<<<<<< Updated upstream
-  { label: 'Volatility', path: '/volatility',   icon: Activity,  section: 'ANALYTICS' },
-  { label: 'ML Signals', path: '/signals',      icon: Brain,     section: 'ANALYTICS' },
-  { label: 'Portfolio',  path: '/portfolio',    icon: Sliders,    section: 'ANALYTICS' },
-  { label: 'News Hub',   path: '/news',          icon: Newspaper,  section: 'NEWS' },
-=======
-  { label: 'Volatility',  path: '/volatility',  icon: Activity,  section: 'ANALYTICS' },
-  { label: 'ML Signals',  path: '/signals',     icon: Brain,     section: 'ANALYTICS' },
-  { label: 'Technical',  path: '/technical',   icon: Activity,  section: 'ANALYTICS' },
-  { label: 'Portfolio',   path: '/portfolio',   icon: Sliders,   section: 'ANALYTICS' },
-  { label: 'Tracker',     path: '/tracker',     icon: LineChart, section: 'ANALYTICS' },
-  { label: 'News Hub',    path: '/news',        icon: Newspaper, section: 'NEWS' },
->>>>>>> Stashed changes
+  { label: 'Volatility',          path: '/volatility',  icon: Activity,  section: 'ANALYTICS' },
+  { label: 'ML Signals',          path: '/signals',     icon: Brain,     section: 'ANALYTICS' },
+  { label: 'Technical Analysis',  path: '/technical',   icon: BarChart2, section: 'ANALYTICS' },
+  { label: 'Portfolio',           path: '/portfolio',   icon: Sliders,   section: 'ANALYTICS' },
+  { label: 'News Hub',            path: '/news',        icon: Newspaper, section: 'NEWS' },
 ]
 
 const SECTIONS = ['MARKET', 'RESEARCH', 'ANALYTICS', 'NEWS']
