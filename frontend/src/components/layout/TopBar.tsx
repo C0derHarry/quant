@@ -1,5 +1,6 @@
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { LineChart } from 'lucide-react'
 import { getMarketStatus } from '../../lib/api'
 
 const TITLES: Record<string, string> = {
@@ -9,6 +10,10 @@ const TITLES: Record<string, string> = {
   '/volatility':    'Volatility Forecast',
   '/portfolio':     'Position Sizing',
   '/technical':     'Technical Analysis',
+  '/tracker':       'Portfolio Tracker',
+  '/signals':       'ML Signals',
+  '/earnings':      'Earnings',
+  '/news':          'News Hub',
 }
 
 function getTitleForPath(pathname: string): string {
@@ -21,7 +26,8 @@ function getTitleForPath(pathname: string): string {
 
 export default function TopBar() {
   const { pathname } = useLocation()
-  const title = getTitleForPath(pathname)
+  const navigate     = useNavigate()
+  const title        = getTitleForPath(pathname)
 
   const { data } = useQuery({
     queryKey:  ['market-status'],
@@ -37,6 +43,21 @@ export default function TopBar() {
       <h1 className="text-md font-semibold text-ink-primary">{title}</h1>
 
       <div className="flex items-center gap-4">
+        {/* Portfolio Tracker shortcut */}
+        <button
+          onClick={() => navigate('/tracker')}
+          className={`flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs font-medium transition-colors ${
+            pathname === '/tracker'
+              ? 'border-accent/40 bg-accent/10 text-accent'
+              : 'border-border bg-bg-elevated text-ink-secondary hover:border-accent/40 hover:text-accent'
+          }`}
+        >
+          <LineChart size={12} />
+          My Portfolio
+        </button>
+
+        <div className="h-4 w-px bg-border" />
+
         {/* Market status */}
         <div className="flex items-center gap-2 rounded-sm border border-border bg-bg-elevated px-3 py-1.5">
           <span

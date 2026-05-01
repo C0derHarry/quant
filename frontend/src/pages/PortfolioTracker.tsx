@@ -181,7 +181,7 @@ export default function PortfolioTracker() {
   const list = portfolios ?? []
 
   return (
-    <div className="flex h-full gap-5 overflow-hidden p-5">
+    <div className="flex h-[calc(100vh-104px)] gap-5 overflow-hidden">
 
       {/* ── Left: portfolio list ── */}
       <div className="flex w-[260px] shrink-0 flex-col gap-3">

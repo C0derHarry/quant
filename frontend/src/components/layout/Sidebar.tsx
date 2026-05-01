@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   BarChart2, TrendingUp, Search, Activity, Sliders,
-  ChevronRight, Layers, Home, Brain, Newspaper, Award, LineChart, LogOut,
+  ChevronRight, Home, Brain, Newspaper, Award, LogOut,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useAuth } from '../../contexts/AuthContext'
@@ -15,7 +15,6 @@ const NAV = [
   { label: 'ML Signals',          path: '/signals',     icon: Brain,     section: 'ANALYTICS' },
   { label: 'Technical Analysis',  path: '/technical',   icon: BarChart2, section: 'ANALYTICS' },
   { label: 'Portfolio',           path: '/portfolio',   icon: Sliders,   section: 'ANALYTICS' },
-  { label: 'Tracker',             path: '/tracker',     icon: LineChart, section: 'ANALYTICS' },
   { label: 'News Hub',            path: '/news',        icon: Newspaper, section: 'NEWS' },
 ]
 
