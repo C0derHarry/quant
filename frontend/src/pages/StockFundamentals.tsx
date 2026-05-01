@@ -1,15 +1,15 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
-  getOHLCV, getKPIs, getRollingKPIs,
-  type FundamentalsReq, type OHLCVRow, type KPISet, type RollingRow,
+  getOHLCV, getKPIs, getRollingKPIs, getStockNews,
+  type FundamentalsReq, type OHLCVRow, type KPISet, type RollingRow, type NewsArticle,
 } from '../lib/api'
 import Spinner from '../components/ui/Spinner'
 import MetricCard from '../components/ui/MetricCard'
 import Badge from '../components/ui/Badge'
 import StockBrowser from '../components/ui/StockBrowser'
-import { X, Play, BarChart3, TrendingUp, Activity } from 'lucide-react'
+import { X, Play, BarChart3, TrendingUp, TrendingDown, Minus, Zap, Activity, Newspaper } from 'lucide-react'
 import { cn, fmt, fmtPct, fmtLargeNum } from '../lib/utils'
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area,
@@ -44,7 +44,7 @@ const INTERVAL_LABEL: Record<string, string> = {
   '1d': '1D', '5d': '5D', '1wk': '1W', '1mo': '1M',
 }
 
-type ResultTab    = 'price' | 'kpis' | 'rolling'
+type ResultTab    = 'price' | 'kpis' | 'rolling' | 'news'
 type RollingMetric = 'rolling_cagr' | 'rolling_sharpe' | 'rolling_calmar' | 'drawdown'
 
 const ROLLING_LABELS: Record<RollingMetric, string> = {
@@ -129,6 +129,113 @@ function KPIGrid({ ticker, kpi, color }: { ticker: string; kpi: KPISet; color: s
   )
 }
 
+// ── News tab helpers ──────────────────────────────────────────────────────────
+
+const SENTIMENT_COLORS: Record<string, string> = {
+  'Bullish':          '#3FB950',
+  'Somewhat-Bullish': '#3FB950',
+  'Neutral':          '#21262D',
+  'Somewhat-Bearish': '#F85149',
+  'Bearish':          '#F85149',
+}
+
+function newsTimeAgo(pub: string): string {
+  const diff = Date.now() - new Date(pub).getTime()
+  const mins = Math.floor(diff / 60_000)
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
+}
+
+function SentimentPulseBanner({ articles }: { articles: NewsArticle[] }) {
+  if (!articles.length) return null
+  const avg    = articles.reduce((s, a) => s + a.sentiment_score, 0) / articles.length
+  const label  = avg > 0.1 ? 'Bullish' : avg < -0.1 ? 'Bearish' : 'Neutral'
+  const isBull = label === 'Bullish'
+  const isBear = label === 'Bearish'
+  return (
+    <div className={cn(
+      'flex items-center gap-3 rounded-md border px-4 py-3',
+      isBull ? 'border-gain/30 bg-gain/5' : isBear ? 'border-loss/30 bg-loss/5' : 'border-border bg-bg-elevated',
+    )}>
+      <span className={cn(
+        'text-xs font-semibold uppercase tracking-wider',
+        isBull ? 'text-gain' : isBear ? 'text-loss' : 'text-ink-muted',
+      )}>Sentiment Pulse</span>
+      {isBull
+        ? <TrendingUp size={14} className="text-gain" />
+        : isBear
+        ? <TrendingDown size={14} className="text-loss" />
+        : <Minus size={14} className="text-ink-muted" />}
+      <span className={cn(
+        'font-mono text-sm font-semibold',
+        isBull ? 'text-gain' : isBear ? 'text-loss' : 'text-ink-secondary',
+      )}>{label}</span>
+      <span className="ml-auto text-2xs text-ink-disabled">
+        avg {avg.toFixed(2)} across {articles.length} article{articles.length !== 1 ? 's' : ''}
+      </span>
+    </div>
+  )
+}
+
+function MarketAlertCallout({ articles }: { articles: NewsArticle[] }) {
+  const strong = articles.filter(a => Math.abs(a.sentiment_score) > 0.4)
+  if (!strong.length) return null
+  const dominantBull = strong.filter(a => a.sentiment_score > 0).length >= strong.length / 2
+  return (
+    <div className={cn(
+      'flex items-start gap-2.5 rounded-md border px-3.5 py-2.5',
+      dominantBull ? 'border-gain/30 bg-gain/5' : 'border-loss/30 bg-loss/5',
+    )}>
+      <Zap size={13} className={cn('mt-0.5 shrink-0', dominantBull ? 'text-gain' : 'text-loss')} />
+      <div>
+        <p className={cn('text-xs font-semibold', dominantBull ? 'text-gain' : 'text-loss')}>
+          Market Alert
+        </p>
+        <p className="text-xs text-ink-muted">
+          {dominantBull
+            ? 'Strong bullish signals detected — monitor this stock closely'
+            : 'Strong bearish signals detected — review position risk'}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function NewsCardCompact({ article }: { article: NewsArticle }) {
+  const color   = SENTIMENT_COLORS[article.sentiment_label] ?? '#21262D'
+  const isBull  = article.sentiment_label.includes('Bullish')
+  const isBear  = article.sentiment_label.includes('Bearish')
+  return (
+    <a
+      href={article.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex cursor-pointer flex-col gap-1.5 rounded-md border border-border bg-bg-elevated p-3 transition-all hover:border-border-strong"
+      style={{ borderLeftColor: color, borderLeftWidth: '2px' }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-2xs font-semibold uppercase tracking-wide text-ink-disabled">
+          {article.source}
+        </span>
+        <span className="shrink-0 text-2xs text-ink-disabled">{newsTimeAgo(article.published_at)}</span>
+      </div>
+      <p className="line-clamp-2 text-xs font-medium leading-snug text-ink-primary">
+        {article.title}
+      </p>
+      <span className={cn(
+        'text-2xs font-medium',
+        isBull ? 'text-gain' : isBear ? 'text-loss' : 'text-ink-disabled',
+      )}>
+        {article.sentiment_label}
+      </span>
+    </a>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function StockFundamentals() {
   const location = useLocation()
   const [selected, setSelected] = useState<string[]>(() => {
@@ -166,6 +273,14 @@ export default function StockFundamentals() {
 
   const running    = ohlcvMut.isPending || kpiMut.isPending || rollingMut.isPending
   const hasResults = !!ohlcvMut.data
+
+  const primarySymbol = selected[0] ?? ''
+  const newsQuery = useQuery({
+    queryKey: ['stock-news-fundamentals', primarySymbol],
+    queryFn:  () => getStockNews(primarySymbol),
+    enabled:  !!primarySymbol && resultTab === 'news',
+    staleTime: 15 * 60_000,
+  })
 
   const runAll = useCallback(() => {
     const req: FundamentalsReq = { symbols: selected, period, interval, window: rollingWindow }
@@ -332,27 +447,28 @@ export default function StockFundamentals() {
 
         {/* Results */}
         <div className="flex-1 overflow-hidden rounded-md border border-border bg-bg-surface shadow-card">
-          {!hasResults && !running && (
-            <div className="flex h-full flex-col items-center justify-center gap-3">
-              <TrendingUp size={32} className="text-ink-disabled" />
-              <p className="text-sm text-ink-disabled">Select stocks and run analysis to see results.</p>
-            </div>
-          )}
           {running && (
             <div className="flex h-full flex-col items-center justify-center gap-3">
               <Spinner size={24} />
               <p className="text-sm text-ink-muted">Downloading data and computing metrics…</p>
             </div>
           )}
-          {hasResults && !running && (
+          {!running && selected.length === 0 && (
+            <div className="flex h-full flex-col items-center justify-center gap-3">
+              <TrendingUp size={32} className="text-ink-disabled" />
+              <p className="text-sm text-ink-disabled">Select stocks and run analysis to see results.</p>
+            </div>
+          )}
+          {!running && selected.length > 0 && (
             <div className="flex h-full flex-col">
               {/* Tab bar */}
               <div className="flex gap-1 border-b border-border px-4 pt-3">
                 {([
-                  { id: 'price',   label: 'Price Chart',       Icon: TrendingUp },
-                  { id: 'kpis',    label: 'KPIs',              Icon: BarChart3 },
-                  { id: 'rolling', label: 'Rolling Analytics', Icon: Activity },
-                ] as const).map(({ id, label, Icon }) => (
+                  { id: 'price'   as ResultTab, label: 'Price Chart',       Icon: TrendingUp  },
+                  { id: 'kpis'    as ResultTab, label: 'KPIs',              Icon: BarChart3   },
+                  { id: 'rolling' as ResultTab, label: 'Rolling Analytics', Icon: Activity    },
+                  { id: 'news'    as ResultTab, label: 'News',              Icon: Newspaper   },
+                ]).map(({ id, label, Icon }) => (
                   <button key={id} onClick={() => setResultTab(id)}
                     className={cn(
                       'flex items-center gap-1.5 border-b-2 px-4 pb-2.5 text-xs font-semibold transition-colors',
@@ -366,8 +482,16 @@ export default function StockFundamentals() {
               </div>
 
               <div className="flex-1 overflow-auto p-5">
+                {/* Nudge for analysis-dependent tabs before running */}
+                {!hasResults && resultTab !== 'news' && (
+                  <div className="flex h-full flex-col items-center justify-center gap-3">
+                    <TrendingUp size={28} className="text-ink-disabled" />
+                    <p className="text-sm text-ink-disabled">Run analysis to see results.</p>
+                  </div>
+                )}
+
                 {/* Price Chart */}
-                {resultTab === 'price' && (
+                {resultTab === 'price' && hasResults && (
                   <div className="space-y-6">
                     <div>
                       <p className="mb-3 text-2xs font-semibold uppercase tracking-[.08em] text-ink-disabled">
@@ -412,7 +536,7 @@ export default function StockFundamentals() {
                 )}
 
                 {/* KPIs */}
-                {resultTab === 'kpis' && kpiData && (
+                {resultTab === 'kpis' && hasResults && kpiData && (
                   <div className="space-y-4">
                     {selected.map((t, i) => kpiData[t] && (
                       <KPIGrid key={t} ticker={t} kpi={kpiData[t]} color={PALETTE[i]} />
@@ -421,7 +545,7 @@ export default function StockFundamentals() {
                 )}
 
                 {/* Rolling Analytics */}
-                {resultTab === 'rolling' && rollingData && (
+                {resultTab === 'rolling' && hasResults && rollingData && (
                   <div className="space-y-4">
                     <div className="flex flex-wrap gap-2">
                       {(Object.entries(ROLLING_LABELS) as [RollingMetric, string][]).map(([k, v]) => (
@@ -449,6 +573,50 @@ export default function StockFundamentals() {
                         ))}
                       </LineChart>
                     </ResponsiveContainer>
+                  </div>
+                )}
+
+                {/* News */}
+                {resultTab === 'news' && (
+                  <div className="space-y-3">
+                    {!primarySymbol && (
+                      <div className="flex h-full flex-col items-center justify-center gap-3 py-16">
+                        <Newspaper size={28} className="text-ink-disabled" />
+                        <p className="text-sm text-ink-disabled">Select a stock to view news.</p>
+                      </div>
+                    )}
+                    {primarySymbol && newsQuery.isLoading && (
+                      <div className="flex items-center justify-center py-12">
+                        <Spinner size={20} />
+                      </div>
+                    )}
+                    {primarySymbol && newsQuery.error && (
+                      <p className="py-4 text-center text-xs text-loss">
+                        Failed to load news: {(newsQuery.error as Error).message}
+                      </p>
+                    )}
+                    {primarySymbol && newsQuery.data && !newsQuery.isLoading && (() => {
+                      const articles = newsQuery.data.articles
+                      if (!articles.length) return (
+                        <p className="py-12 text-center text-sm text-ink-disabled">
+                          No recent news found for {primarySymbol}.
+                        </p>
+                      )
+                      return (
+                        <>
+                          <SentimentPulseBanner articles={articles} />
+                          <MarketAlertCallout articles={articles} />
+                          <div className="space-y-2">
+                            {articles.map(a => <NewsCardCompact key={a.id} article={a} />)}
+                          </div>
+                          {newsQuery.data.cached && (
+                            <p className="text-2xs text-ink-disabled">
+                              Cached results — refreshes hourly to preserve API quota
+                            </p>
+                          )}
+                        </>
+                      )
+                    })()}
                   </div>
                 )}
               </div>

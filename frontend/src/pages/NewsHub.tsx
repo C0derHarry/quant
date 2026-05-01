@@ -165,7 +165,7 @@ function ImpactCard({ article, impact }: { article: NewsArticle; impact: ImpactD
         <Bar label="Bearish" pct={bearish} color="#F85149" />
       </div>
       <p className="mt-3 text-2xs text-ink-disabled">
-        Based on AlphaVantage NLP sentiment model - live price data available during market hours (9:15 - 15:30 IST)
+        NLP sentiment analysis - live price data available during market hours (9:15 - 15:30 IST)
       </p>
     </div>
   )
@@ -319,7 +319,7 @@ export default function NewsHub() {
       <div>
         <h1 className="text-xl font-semibold text-ink-primary">Market News</h1>
         <p className="mt-0.5 text-sm text-ink-muted">
-          Financial headlines powered by AlphaVantage with NLP sentiment analysis
+          Financial headlines — India market via Marketaux, global via AlphaVantage
         </p>
       </div>
 

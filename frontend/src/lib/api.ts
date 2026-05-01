@@ -136,6 +136,8 @@ export const getStockNews  = (ticker: string, limit = 10) =>
   request<NewsFeed>(`/news/stock?ticker=${encodeURIComponent(ticker)}&limit=${limit}`)
 export const getNewsImpact = (ticker: string, publishedAt: string) =>
   request<ImpactData>(`/news/impact?ticker=${encodeURIComponent(ticker)}&published_at=${encodeURIComponent(publishedAt)}`)
+export const getPortfolioNews = (tickers: string[], limit = 15) =>
+  request<PortfolioNewsFeed>(`/news/portfolio?tickers=${encodeURIComponent(tickers.join(','))}&limit=${limit}`)
 
 // ── Types ─────────────────────────────────────────────────────────
 export interface TickerSnapshot {
@@ -294,6 +296,12 @@ export interface NewsArticle {
   topics:  { topic: string; relevance_score: number }[]
 }
 export interface NewsFeed { articles: NewsArticle[]; cached: boolean }
+export interface PortfolioNewsTickerSentiment {
+  ticker: string; avg_score: number; label: string; article_count: number
+}
+export interface PortfolioNewsFeed {
+  articles: NewsArticle[]; ticker_sentiment: PortfolioNewsTickerSentiment[]; cached: boolean
+}
 export type ImpactData =
   | { market_open: true; current_price: number; change: number; change_pct: number; quote_time: string }
   | { market_open: false }
