@@ -14,6 +14,7 @@ import MLSignals         from './pages/MLSignals'
 import NewsHub           from './pages/NewsHub'
 import EarningsSurprise  from './pages/EarningsSurprise'
 import PortfolioTracker  from './pages/PortfolioTracker'
+import TechnicalAnalysis from './pages/TechnicalAnalysis'
 
 export default function App() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="/news"         element={<NewsHub />} />
             <Route path="/earnings"     element={<EarningsSurprise />} />
             <Route path="/tracker"      element={<PortfolioTracker />} />
+            <Route path="/technical"    element={<TechnicalAnalysis />} />
           </Route>
         </Route>
       </Routes>

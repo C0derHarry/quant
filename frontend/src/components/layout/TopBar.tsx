@@ -8,6 +8,7 @@ const TITLES: Record<string, string> = {
   '/fundamentals':  'Stock Deep-Dive',
   '/volatility':    'Volatility Forecast',
   '/portfolio':     'Position Sizing',
+  '/technical':     'Technical Analysis',
 }
 
 function getTitleForPath(pathname: string): string {

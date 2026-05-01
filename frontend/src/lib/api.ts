@@ -141,6 +141,24 @@ export const getNewsImpact = (ticker: string, publishedAt: string) =>
 export const getPortfolioNews = (tickers: string[], limit = 15) =>
   request<PortfolioNewsFeed>(`/news/portfolio?tickers=${encodeURIComponent(tickers.join(','))}&limit=${limit}`)
 
+// ── Technical Analysis ────────────────────────────────────────────
+export interface TechnicalIndicator {
+  name: string; category: string
+  signal: 'Bullish' | 'Bearish' | 'Neutral'
+  value: string; description: string
+}
+export interface TechnicalSummary {
+  bullish: number; bearish: number; neutral: number; total: number
+  verdict: 'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL'
+  bull_ratio: number
+}
+export interface TechnicalResult {
+  ticker: string; period: string
+  indicators: TechnicalIndicator[]; summary: TechnicalSummary
+}
+export const getTechnicalAnalysis = (ticker: string, period = '1y') =>
+  request<TechnicalResult>(`/technical/analyze?ticker=${encodeURIComponent(ticker)}&period=${period}`)
+
 // ── Types ─────────────────────────────────────────────────────────
 export interface TickerSnapshot {
   price: number; prev_close: number; change: number; pct_change: number

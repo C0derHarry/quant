@@ -68,5 +68,106 @@ def ADX(df, period=20):
     
     df['DX'] = 100 * (np.abs(df['+DI'] - df['-DI']) / (df['+DI'] + df['-DI']))
     df['ADX'] = df['DX'].rolling(window=period).mean()
-    
+
     return df[['ADX', '+DI', '-DI']]
+
+
+# Exponential Moving Average
+def EMA(df, period, column='Close'):
+    df = df.copy()
+    df[f'EMA{period}'] = df[column].ewm(span=period, min_periods=period).mean()
+    return df[[f'EMA{period}']]
+
+
+# Simple Moving Average
+def SMA(df, period, column='Close'):
+    df = df.copy()
+    df[f'SMA{period}'] = df[column].rolling(window=period).mean()
+    return df[[f'SMA{period}']]
+
+
+# Stochastic Oscillator
+def Stochastic(df, k_period=14, d_period=3):
+    df = df.copy()
+    df['Lowest_Low']   = df['Low'].rolling(window=k_period).min()
+    df['Highest_High'] = df['High'].rolling(window=k_period).max()
+    denom = (df['Highest_High'] - df['Lowest_Low']).replace(0, np.nan)
+    df['%K'] = 100 * (df['Close'] - df['Lowest_Low']) / denom
+    df['%D'] = df['%K'].rolling(window=d_period).mean()
+    return df[['%K', '%D']]
+
+
+# On-Balance Volume
+def OBV(df):
+    df = df.copy()
+    df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume']).fillna(0).cumsum()
+    return df[['OBV']]
+
+
+# Volume-Weighted Average Price (rolling daily)
+def VWAP(df, period=20):
+    df = df.copy()
+    df['TP']   = (df['High'] + df['Low'] + df['Close']) / 3
+    df['VWAP'] = (df['TP'] * df['Volume']).rolling(period).sum() / df['Volume'].rolling(period).sum()
+    return df[['VWAP']]
+
+
+# Commodity Channel Index
+def CCI(df, period=20):
+    df = df.copy()
+    df['TP']       = (df['High'] + df['Low'] + df['Close']) / 3
+    df['TP_MA']    = df['TP'].rolling(period).mean()
+    df['Mean_Dev'] = df['TP'].rolling(period).apply(
+        lambda x: np.mean(np.abs(x - x.mean())), raw=True
+    )
+    df['CCI'] = (df['TP'] - df['TP_MA']) / (0.015 * df['Mean_Dev'])
+    return df[['CCI']]
+
+
+# Parabolic SAR
+def ParabolicSAR(df, step=0.02, max_step=0.2):
+    """Returns DataFrame['SAR', 'Trend'] where Trend: 1=uptrend, -1=downtrend."""
+    high  = df['High'].values
+    low   = df['Low'].values
+    close = df['Close'].values
+    n     = len(close)
+
+    sar   = np.full(n, np.nan)
+    trend = np.ones(n, dtype=int)
+    af    = step
+    ep    = high[0]
+    sar[0] = low[0]
+
+    for i in range(1, n):
+        prev_sar = sar[i - 1]
+        if trend[i - 1] == 1:
+            sar[i] = prev_sar + af * (ep - prev_sar)
+            sar[i] = min(sar[i], low[i - 1], low[max(0, i - 2)])
+            if low[i] < sar[i]:
+                trend[i] = -1
+                sar[i]   = ep
+                ep        = low[i]
+                af        = step
+            else:
+                trend[i] = 1
+                if high[i] > ep:
+                    ep = high[i]
+                    af = min(af + step, max_step)
+        else:
+            sar[i] = prev_sar + af * (ep - prev_sar)
+            sar[i] = max(sar[i], high[i - 1], high[max(0, i - 2)])
+            if high[i] > sar[i]:
+                trend[i] = 1
+                sar[i]   = ep
+                ep        = high[i]
+                af        = step
+            else:
+                trend[i] = -1
+                if low[i] < ep:
+                    ep = low[i]
+                    af = min(af + step, max_step)
+
+    result = pd.DataFrame(index=df.index)
+    result['SAR']   = sar
+    result['Trend'] = trend
+    return result[['SAR', 'Trend']]
