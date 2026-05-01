@@ -380,6 +380,73 @@ const TABS: { id: TabId; label: string; icon: React.ElementType; tooltip: string
   { id: 'sensitivity', label: 'Sensitivity', icon: BarChart2, tooltip: 'Sweeps ATR stop multiplier and transaction cost across a 5×4 grid and records the Sharpe ratio at each combination. A broad green plateau means the strategy is robust. A single bright cell surrounded by red means performance is fragile and likely overfitted.' },
 ]
 
+function SavePortfolioWidget({
+  selected, currentWeights, capital, portfolioType, msResult, rpResult, savedId, onSaved,
+}: {
+  selected:       string[]
+  currentWeights: Record<string, number> | null
+  capital:        number
+  portfolioType:  PortfolioType
+  msResult:       OptimizeResult | null
+  rpResult:       RiskParityResult | null
+  savedId:        string | null
+  onSaved:        (id: string) => void
+}) {
+  const [name, setName] = useState('')
+  const saveMut = useMutation({
+    mutationFn: savePortfolio,
+    onSuccess:  d => onSaved(d.id),
+  })
+
+  if (savedId) return (
+    <div className="flex items-center gap-2 text-gain">
+      <BookmarkCheck size={14} />
+      <span className="text-xs font-semibold">Saved to your Tracker</span>
+    </div>
+  )
+
+  return (
+    <>
+      <Save size={14} className="shrink-0 text-ink-muted" />
+      <input
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && name.trim() && !saveMut.isPending) {
+            saveMut.mutate({
+              name:            name.trim(),
+              tickers:         selected,
+              weights:         currentWeights ?? {},
+              capital,
+              portfolio_type:  portfolioType,
+              optimize_result: (msResult ?? rpResult ?? undefined) as any,
+            })
+          }
+        }}
+        placeholder="Portfolio name…"
+        className="flex-1 bg-transparent text-sm text-ink-primary outline-none placeholder:text-ink-disabled"
+      />
+      <button
+        disabled={!name.trim() || saveMut.isPending}
+        onClick={() => saveMut.mutate({
+          name:            name.trim(),
+          tickers:         selected,
+          weights:         currentWeights ?? {},
+          capital,
+          portfolio_type:  portfolioType,
+          optimize_result: (msResult ?? rpResult ?? undefined) as any,
+        })}
+        className="shrink-0 rounded border border-accent bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-all hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {saveMut.isPending ? 'Saving…' : 'Save'}
+      </button>
+      {saveMut.isError && (
+        <span className="text-xs text-loss">{(saveMut.error as Error).message}</span>
+      )}
+    </>
+  )
+}
+
 export default function PositionSizing() {
   const [searchParams] = useSearchParams()
   const urlTickers = useMemo(
@@ -455,13 +522,7 @@ export default function PositionSizing() {
   })
 
   // ── Save state ────────────────────────────────────────────────────
-  const [saveName, setSaveName]         = useState('')
   const [savedPortfolioId, setSavedId]  = useState<string | null>(null)
-
-  const saveMut = useMutation({
-    mutationFn: savePortfolio,
-    onSuccess:  d => setSavedId(d.id),
-  })
 
   const saveBtMut = useMutation({ mutationFn: ({ id, r }: { id: string; r: unknown }) => saveBacktestResult(id, r) })
 
@@ -877,38 +938,16 @@ export default function PositionSizing() {
 
             {/* Save portfolio */}
             <div className="flex items-center gap-3 rounded-lg border border-border bg-bg-surface px-4 py-3">
-              {savedPortfolioId ? (
-                <div className="flex items-center gap-2 text-gain">
-                  <BookmarkCheck size={14} />
-                  <span className="text-xs font-semibold">Saved to your Tracker</span>
-                </div>
-              ) : (
-                <>
-                  <Save size={14} className="shrink-0 text-ink-muted" />
-                  <input
-                    value={saveName} onChange={e => setSaveName(e.target.value)}
-                    placeholder="Portfolio name…"
-                    className="flex-1 bg-transparent text-sm text-ink-primary outline-none placeholder:text-ink-disabled"
-                  />
-                  <button
-                    disabled={!saveName.trim() || saveMut.isPending}
-                    onClick={() => saveMut.mutate({
-                      name:            saveName.trim(),
-                      tickers:         selected,
-                      weights:         currentWeights ?? {},
-                      capital,
-                      portfolio_type:  portfolioType,
-                      optimize_result: (msResult ?? rpResult ?? undefined) as any,
-                    })}
-                    className="shrink-0 rounded border border-accent bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-all hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {saveMut.isPending ? 'Saving…' : 'Save'}
-                  </button>
-                </>
-              )}
-              {saveMut.isError && (
-                <span className="text-xs text-loss">{(saveMut.error as Error).message}</span>
-              )}
+              <SavePortfolioWidget
+                selected={selected}
+                currentWeights={currentWeights}
+                capital={capital}
+                portfolioType={portfolioType}
+                msResult={msResult}
+                rpResult={rpResult}
+                savedId={savedPortfolioId}
+                onSaved={setSavedId}
+              />
             </div>
 
             {/* Efficient Frontier chart */}

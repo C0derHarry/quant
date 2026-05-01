@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Trash2, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react'
+import { Trash2, TrendingUp, TrendingDown, BarChart2, Minus, ExternalLink } from 'lucide-react'
 import {
-  listPortfolios, deletePortfolio, getTrackerData,
-  type SavedPortfolio, type TrackerResult,
+  listPortfolios, deletePortfolio, getTrackerData, getPortfolioNews,
+  type SavedPortfolio, type TrackerResult, type NewsArticle,
+  type PortfolioNewsTickerSentiment,
 } from '../lib/api'
 import Spinner, { ErrorState } from '../components/ui/Spinner'
 import MetricCard from '../components/ui/MetricCard'
@@ -12,6 +13,140 @@ import {
   ResponsiveContainer, ComposedChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend,
 } from 'recharts'
+
+// ── Portfolio news sub-components ─────────────────────────────────────────────
+
+function ptTimeAgo(pub: string): string {
+  const diff = Date.now() - new Date(pub).getTime()
+  const mins = Math.floor(diff / 60_000)
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
+}
+
+function TickerSentimentChip({ ts }: { ts: PortfolioNewsTickerSentiment }) {
+  const isBull = ts.label.includes('Bullish')
+  const isBear = ts.label.includes('Bearish')
+  return (
+    <div className={cn(
+      'flex items-center gap-1.5 rounded border px-2 py-1',
+      isBull ? 'border-gain/30 bg-gain/5'
+             : isBear ? 'border-loss/30 bg-loss/5'
+                      : 'border-border bg-bg-elevated',
+    )}>
+      <span className="font-mono text-xs font-semibold text-ink-primary">{ts.ticker}</span>
+      {isBull
+        ? <TrendingUp  size={10} className="text-gain" />
+        : isBear
+        ? <TrendingDown size={10} className="text-loss" />
+        : <Minus size={10} className="text-ink-disabled" />}
+      <span className={cn(
+        'text-2xs font-medium',
+        isBull ? 'text-gain' : isBear ? 'text-loss' : 'text-ink-disabled',
+      )}>{ts.label}</span>
+    </div>
+  )
+}
+
+function PortfolioNewsCard({ article }: { article: NewsArticle }) {
+  const isBull     = article.sentiment_label.includes('Bullish')
+  const isBear     = article.sentiment_label.includes('Bearish')
+  const borderColor = isBull ? '#3FB950' : isBear ? '#F85149' : '#21262D'
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-md border border-border bg-bg-elevated p-3"
+      style={{ borderLeftColor: borderColor, borderLeftWidth: '2px' }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-2xs font-semibold uppercase tracking-wide text-ink-disabled">
+          {article.source}
+        </span>
+        <span className="shrink-0 text-2xs text-ink-disabled">{ptTimeAgo(article.published_at)}</span>
+      </div>
+      <p className="line-clamp-2 text-xs font-medium leading-snug text-ink-primary">
+        {article.title}
+      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1">
+          {article.tickers.slice(0, 3).map(t => (
+            <span key={t.ticker} className={cn(
+              'rounded px-1.5 py-0.5 font-mono text-2xs font-medium',
+              t.sentiment_label.includes('Bullish') ? 'bg-gain/10 text-gain'
+                : t.sentiment_label.includes('Bearish') ? 'bg-loss/10 text-loss'
+                : 'bg-bg-overlay text-ink-secondary',
+            )}>
+              {t.ticker}
+            </span>
+          ))}
+        </div>
+        <a
+          href={article.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          className="flex items-center gap-1 text-2xs text-ink-disabled hover:text-accent"
+        >
+          Read <ExternalLink size={9} />
+        </a>
+      </div>
+    </div>
+  )
+}
+
+function PortfolioNewsSection({ tickers }: { tickers: string[] }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey:  ['portfolio-news', tickers.slice().sort().join(',')],
+    queryFn:   () => getPortfolioNews(tickers, 10),
+    staleTime: 15 * 60_000,
+    enabled:   tickers.length > 0,
+  })
+
+  return (
+    <div className="rounded-lg border border-border bg-bg-surface">
+      <p className="border-b border-border px-4 py-3 text-xs font-semibold uppercase tracking-widest text-ink-disabled">
+        Portfolio News
+      </p>
+      <div className="space-y-3 p-4">
+        {isLoading && (
+          <div className="flex items-center justify-center py-6">
+            <Spinner size={18} />
+          </div>
+        )}
+        {error && (
+          <p className="text-xs text-loss">{(error as Error).message}</p>
+        )}
+        {data && !isLoading && (
+          <>
+            {data.ticker_sentiment.filter(ts => ts.article_count > 0).length > 0 && (
+              <div className="flex flex-wrap gap-2 pb-1">
+                {data.ticker_sentiment
+                  .filter(ts => ts.article_count > 0)
+                  .map(ts => <TickerSentimentChip key={ts.ticker} ts={ts} />)}
+              </div>
+            )}
+            {data.articles.length === 0 ? (
+              <p className="py-4 text-center text-xs text-ink-disabled">
+                No recent news found for this portfolio.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {data.articles.map(a => <PortfolioNewsCard key={a.id} article={a} />)}
+              </div>
+            )}
+            {data.cached && (
+              <p className="text-2xs text-ink-disabled">
+                Cached results — refreshes hourly to preserve API quota
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function PortfolioTracker() {
   const qc = useQueryClient()
@@ -245,6 +380,9 @@ function TrackerDetail({ tracker: t }: { tracker: TrackerResult }) {
           ))}
         </div>
       </div>
+
+      {/* Portfolio News */}
+      <PortfolioNewsSection tickers={t.tickers} />
     </>
   )
 }
