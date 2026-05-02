@@ -325,3 +325,44 @@ export interface PortfolioNewsFeed {
 export type ImpactData =
   | { market_open: true; current_price: number; change: number; change_pct: number; quote_time: string }
   | { market_open: false }
+
+// ── AI Overview ───────────────────────────────────────────────────────────
+
+export interface AIStockAnalysis {
+  symbol:        string
+  company_name:  string
+  sector:        string
+  current_price: number | null
+  pe:            number | null
+  roe:           number | null
+  de:            number | null
+  tech_verdict:  'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL'
+  bullish_count: number
+  bearish_count: number
+  neutral_count: number
+  rsi:           number | null
+  macd_signal:   'Bullish' | 'Bearish' | 'Neutral'
+  ema_signal:    'Bullish' | 'Bearish' | 'Neutral'
+  adx_signal:    'Bullish' | 'Bearish' | 'Neutral'
+  bb_signal:     'Bullish' | 'Bearish' | 'Neutral'
+  quality_verdict: 'Genuinely Discounted' | 'Value Trap' | 'Overvalued' | 'Watch'
+  conviction:      'High' | 'Medium' | 'Low'
+  entry_comment:   string
+  stop_comment:    string
+  target_comment:  string
+  reasoning:       string
+}
+
+export interface AIOverviewResult {
+  stocks:          AIStockAnalysis[]
+  generated_at:    string
+  generated_at_ts: number
+  candidate_count: number
+  universe_size:   number
+  from_cache:      boolean
+}
+
+export const getAIOverview = (force = false, checkOnly = false) =>
+  request<AIOverviewResult>(
+    `/ai-overview/analyze?force=${force}&check_only=${checkOnly}`
+  )

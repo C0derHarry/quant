@@ -12,9 +12,8 @@ import pandas as pd
 
 def magic_formula_rank(ticker_list):
     '''
-    DO NOT PASS STOCKS BELONGING TO BANKING SECTOR
-    Uses Joel Greenblatt's magic formula to calculate the Earnings Yield and Return On Capital of all the stocks in your universe.
-    Return a dataframe of all the stocks with their individual Earnings Yield rank, ROC rank and combined rank.
+    Uses Joel Greenblatt's magic formula to calculate Earnings Yield and Return On Capital.
+    Banking/financial stocks use Pretax Income and equity-based invested capital as proxies.
 
     Args:
         ticker_list (List): List of all the stocks you want to compare
@@ -30,43 +29,54 @@ def magic_formula_rank(ticker_list):
     results = []
 
     for ticker in ticker_list:
-        try: 
+        try:
             data = financial_data.get(ticker)
             if not data: continue
 
-            # Extract Info metrics with fallback to 0
             info = data['info']
             total_cash = info.get('totalCash', 0) or 0
             total_debt = info.get('totalDebt', 0) or 0
             market_cap = info.get('marketCap', 0) or 0
 
-            print(f'total cash = {total_cash}, total debt = {total_debt}, market_cap = {market_cap}')
+            fin = data['financials']
+            bs  = data['balance_sheet']
 
-            # Extract Financials/Balance Sheet
-            ebit_series = data['financials'].loc['EBIT']
-            net_ppe_series = data['balance_sheet'].loc['Net PPE']
-            curr_assets_series = data['balance_sheet'].loc['Current Assets']
-            curr_liabs_series = data['balance_sheet'].loc['Current Liabilities']
-
-            if any(x is None for x in [ebit_series, net_ppe_series, curr_assets_series, curr_liabs_series]):
-                print(f"Skipping {ticker}: Missing key line items.")
+            # EBIT: use directly if available, else fall back to Pretax Income (banks/holding cos)
+            if 'EBIT' in fin.index:
+                EBIT = fin.loc['EBIT'].iloc[0]
+            elif 'Pretax Income' in fin.index:
+                EBIT = fin.loc['Pretax Income'].iloc[0]
+            else:
+                print(f"Skipping {ticker}: no EBIT or Pretax Income in financials")
                 continue
 
-            EBIT = ebit_series.iloc[0]
-            fixed_assets = net_ppe_series.iloc[0]
-            working_capital = curr_assets_series.iloc[0] - curr_liabs_series.iloc[0]
+            if EBIT is None or (hasattr(EBIT, '__float__') and pd.isna(float(EBIT))):
+                print(f"Skipping {ticker}: EBIT is null")
+                continue
 
-            print(f'EBIT = {EBIT}, fixed_assets = {fixed_assets}, working_capital = {working_capital}')
-            
-            # Formula Calculations
+            # Invested capital: standard (Net PPE + working capital), then balance-sheet fallback for banks
+            if 'Current Assets' in bs.index and 'Current Liabilities' in bs.index:
+                net_ppe      = bs.loc['Net PPE'].iloc[0] if 'Net PPE' in bs.index else 0
+                working_cap  = bs.loc['Current Assets'].iloc[0] - bs.loc['Current Liabilities'].iloc[0]
+                invested_capital = (net_ppe or 0) + working_cap
+            elif 'Invested Capital' in bs.index:
+                invested_capital = bs.loc['Invested Capital'].iloc[0]
+            elif 'Common Stock Equity' in bs.index:
+                invested_capital = bs.loc['Common Stock Equity'].iloc[0]
+            elif 'Stockholders Equity' in bs.index:
+                invested_capital = bs.loc['Stockholders Equity'].iloc[0]
+            else:
+                print(f"Skipping {ticker}: cannot determine invested capital")
+                continue
+
+            if not invested_capital or pd.isna(float(invested_capital)):
+                print(f"Skipping {ticker}: invested capital is null/zero")
+                continue
+
             enterprise_value = market_cap + total_debt - total_cash
-            
-            # Earnings Yield: EBIT / EV
-            earnings_yield = EBIT / enterprise_value if enterprise_value > 0 else 0
-            
-            # ROC: EBIT / (Fixed Assets + Working Capital)
-            invested_capital = fixed_assets + working_capital
-            ROC = EBIT / invested_capital if invested_capital > 0 else 0
+
+            earnings_yield = float(EBIT) / enterprise_value if enterprise_value > 0 else 0
+            ROC = float(EBIT) / float(invested_capital) if float(invested_capital) > 0 else 0
 
             results.append({
                 "Ticker": ticker,
@@ -74,7 +84,7 @@ def magic_formula_rank(ticker_list):
                 "ROC": ROC
             })
 
-        except Exception as e: 
+        except Exception as e:
             print(f'Error calculating rank for {ticker}: {e}')
 
     # 2. Create DataFrame
@@ -113,25 +123,48 @@ def qarp_screener(ticker_list):
     results = []
     for ticker in ticker_list:
         try:
-            info = financial_data.get(ticker)
+            data = financial_data.get(ticker)
+            if not data:
+                continue
+            inf = data['info']
+            fin = data['financials']
+            bs  = data['balance_sheet']
 
-            # Return on equity(ROE) = Net Income/Shareholders Equity
-            net_income = info['financials'].loc['Net Income']
-            shareholders_equity = info['balance_sheet'].loc['Stockholders Equity']
+            # ROE: Net Income / Stockholders Equity, fall back to info.returnOnEquity
+            try:
+                net_income = fin.loc['Net Income'].iloc[0]
+                equity_row = 'Stockholders Equity' if 'Stockholders Equity' in bs.index else 'Common Stock Equity'
+                equity = bs.loc[equity_row].iloc[0]
+                return_on_equity = float(net_income) / float(equity)
+            except Exception:
+                roe_raw = inf.get('returnOnEquity')
+                if roe_raw is None:
+                    print(f"Could not process {ticker}: no ROE data")
+                    continue
+                return_on_equity = float(roe_raw)
 
-            return_on_equity = net_income.iloc[0]/shareholders_equity.iloc[0]
+            # D/E: yfinance reports as percentage (e.g. 45 means 0.45); None for banks/some industrials
+            # Fall back to priceToBook proxy: P/B < 3 treated as acceptable leverage
+            de_raw = inf.get('debtToEquity')
+            if de_raw is not None:
+                debt_to_equity = de_raw / 100
+                is_healthy = debt_to_equity < 0.5
+            else:
+                ptb = inf.get('priceToBook')
+                debt_to_equity = None
+                is_healthy = ptb is not None and ptb < 3.0
 
-            # --- Filter 2: Financial Health (Debt-to-Equity) ---
-            debt_to_equity = info['info'].get('debtToEquity')/100
+            # P/E: handle None forwardPE or trailingPE
+            current_pe  = inf.get('forwardPE')
+            trailing_pe = inf.get('trailingPE')
+            if current_pe is None:
+                is_cheap = False
+            elif trailing_pe is not None:
+                is_cheap = current_pe < 15 or current_pe < (trailing_pe * 0.9)
+            else:
+                is_cheap = current_pe < 15
 
-            # --- Filter 3: The Value Hook (P/E Ratios) ---
-            current_pe = info['info'].get('forwardPE')
-            trailing_pe = info['info'].get('trailingPE')
-            
-            # Logic Check
             is_quality = return_on_equity > 0.20
-            is_healthy = debt_to_equity < 0.5
-            is_cheap = current_pe < 15 or current_pe < (trailing_pe * 0.9) # Simple proxy for 'on sale'
 
             criteria_met = sum([is_quality, is_healthy, is_cheap])
             if criteria_met == 3:
@@ -142,14 +175,13 @@ def qarp_screener(ticker_list):
                 verdict = "AVOID"
 
             results.append({
-                "Ticker": ticker,
-                "ROE": f"{return_on_equity:.2%}",
-                "D/E": round(debt_to_equity, 2),
-                "Forward P/E": round(current_pe, 2),
-                "Verdict": verdict,
+                "Ticker":      ticker,
+                "ROE":         f"{return_on_equity:.2%}",
+                "D/E":         round(debt_to_equity, 2) if debt_to_equity is not None else "N/A",
+                "Forward P/E": round(current_pe, 2) if current_pe is not None else "N/A",
+                "Verdict":     verdict,
             })
 
-            
         except Exception as e:
             print(f"Could not process {ticker}: {e}")
 
