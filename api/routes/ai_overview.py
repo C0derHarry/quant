@@ -1,39 +1,61 @@
+import hashlib
 import json
-import os
+import logging
 import time
-import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from google import genai
-from google.genai import types as genai_types
-import numpy as np
-import pandas as pd
 import yfinance as yf
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from nsetools import Nse
 
-from core.screeners import magic_formula_rank, qarp_screener
-from api.routes.technical import _evaluate_indicators, _verdict, _normalize, _safe_float
+from api.routes.technical import (
+    _evaluate_indicators, _verdict, _normalize, _safe_float, _flatten_yf_columns,
+)
+from api.deps import get_current_user, supabase_client, AuthUser
+from core.llm import call_llm
+
+# yfinance .info path is noisy with "Invalid Crumb" 401s — silence those logs.
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 router = APIRouter()
 
 CACHE_DIR  = Path(__file__).parent.parent / "ai_cache"
 CACHE_DIR.mkdir(exist_ok=True)
-CACHE_FILE = CACHE_DIR / "ai_overview.json"
 CACHE_TTL  = 4 * 3600
+
+ALLOWED_UNIVERSES = [
+    "NIFTY 50",
+    "NIFTY 100",
+    "NIFTY MIDCAP 100",
+    "NIFTY SMALLCAP 100",
+    "NIFTY BANK",
+    "NIFTY IT",
+]
+LLM_BATCH_SIZE = 25
 
 nse = Nse()
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────
 
-def _load_cache() -> dict | None:
-    if not CACHE_FILE.exists():
+def _cache_key(universe: str, extras: list[str], provider: str, model: str) -> str:
+    raw = f"{universe}|{','.join(sorted(extras))}|{provider}|{model}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def _cache_path(key: str) -> Path:
+    return CACHE_DIR / f"{key}.json"
+
+
+def _load_cache(key: str) -> dict | None:
+    path = _cache_path(key)
+    if not path.exists():
         return None
     try:
-        data = json.loads(CACHE_FILE.read_text())
+        data = json.loads(path.read_text())
         if time.time() - data.get("generated_at_ts", 0) < CACHE_TTL:
             return data
     except Exception:
@@ -41,52 +63,71 @@ def _load_cache() -> dict | None:
     return None
 
 
-def _save_cache(data: dict) -> None:
+def _save_cache(key: str, data: dict) -> None:
     try:
-        CACHE_FILE.write_text(json.dumps(data, default=str))
+        _cache_path(key).write_text(json.dumps(data, default=str))
     except Exception:
         pass
 
 
-# ── Stage 1: Screening ────────────────────────────────────────────────────
+# ── Stage 1: Universe resolution ──────────────────────────────────────────
 
-def _get_nifty100_tickers() -> list[str]:
-    raw = nse.get_stock_quote_in_index("NIFTY 100")
-    return [s["symbol"] for s in raw if s.get("symbol")]
-
-
-def _stage1_screen(universe: list[str]) -> list[str]:
-    qarp_buys: set[str] = set()
-    mf_top: set[str] = set()
-
-    try:
-        qarp_df = qarp_screener(universe)
-        if not qarp_df.empty and "Verdict" in qarp_df.columns:
-            qarp_buys = set(
-                qarp_df[qarp_df["Verdict"] == "BUY"]["Ticker"]
-                .str.replace(".NS", "", regex=False)
-                .tolist()
-            )
-    except Exception as e:
-        print(f"QARP screener error: {e}")
-
-    try:
-        mf_df = magic_formula_rank(universe)
-        if not mf_df.empty:
-            top_n = max(1, len(mf_df) // 4)
-            mf_top = set(
-                mf_df.head(top_n)["Ticker"]
-                .str.replace(".NS", "", regex=False)
-                .tolist()
-            )
-    except Exception as e:
-        print(f"Magic Formula error: {e}")
-
-    candidates = list(qarp_buys | mf_top)
-    return candidates[:25]
+def _resolve_universe(name: str, extras: list[str]) -> list[str]:
+    if name not in ALLOWED_UNIVERSES:
+        raise ValueError(f"Unknown universe: {name}")
+    raw = nse.get_stock_quote_in_index(name)
+    base = [s["symbol"] for s in raw if s.get("symbol")]
+    seen: set[str] = set()
+    merged: list[str] = []
+    for sym in [*base, *(e.upper() for e in extras)]:
+        if sym and sym not in seen:
+            seen.add(sym)
+            merged.append(sym)
+    return merged
 
 
 # ── Stage 2: Technical enrichment ────────────────────────────────────────
+
+def _safe_info(tk: yf.Ticker) -> dict:
+    """Best-effort info fetch. .info fails intermittently with 'Invalid Crumb';
+    fall back to fast_info for the few fields we actually need."""
+    try:
+        info = tk.info
+        if info:
+            return info
+    except Exception:
+        pass
+    try:
+        fi = tk.fast_info
+        return {
+            "currentPrice":  getattr(fi, "last_price", None),
+            "previousClose": getattr(fi, "previous_close", None),
+        }
+    except Exception:
+        return {}
+
+
+def _safe_roe(tk: yf.Ticker, info: dict) -> float | None:
+    try:
+        fin_df = tk.financials
+        bs_df  = tk.balance_sheet
+        if fin_df is None or bs_df is None or fin_df.empty or bs_df.empty:
+            raise ValueError("financials unavailable")
+        net_inc = float(fin_df.loc["Net Income"].iloc[0])
+        eq_row  = "Stockholders Equity" if "Stockholders Equity" in bs_df.index else "Common Stock Equity"
+        equity  = float(bs_df.loc[eq_row].iloc[0])
+        if equity:
+            return round(net_inc / equity * 100, 2)
+    except Exception:
+        pass
+    roe_raw = info.get("returnOnEquity")
+    if roe_raw is not None:
+        try:
+            return round(float(roe_raw) * 100, 2)
+        except Exception:
+            return None
+    return None
+
 
 def _analyze_one_ticker(symbol: str) -> dict | None:
     ns = _normalize(symbol)
@@ -94,8 +135,7 @@ def _analyze_one_ticker(symbol: str) -> dict | None:
         raw = yf.download(ns, period="1y", auto_adjust=True, progress=False, actions=False)
         if raw.empty or len(raw) < 60:
             return None
-        if isinstance(raw.columns, pd.MultiIndex):
-            raw.columns = raw.columns.get_level_values(0)
+        raw = _flatten_yf_columns(raw)
         for col in ("Open", "High", "Low", "Close", "Volume"):
             if col not in raw.columns:
                 return None
@@ -118,28 +158,20 @@ def _analyze_one_ticker(symbol: str) -> dict | None:
         except Exception:
             pass
 
-        info    = yf.Ticker(ns).info or {}
+        tk      = yf.Ticker(ns)
+        info    = _safe_info(tk)
         price   = _safe_float(info.get("currentPrice") or info.get("previousClose"))
+        if price is None:
+            try:
+                price = _safe_float(raw["Close"].iloc[-1])
+            except Exception:
+                price = None
         pe      = _safe_float(info.get("forwardPE") or info.get("trailingPE"))
         de_raw  = _safe_float(info.get("debtToEquity"))
         de      = round(de_raw / 100, 2) if de_raw else None
         sector  = info.get("sector", "Unknown")
-        company = info.get("shortName", symbol)
-
-        roe = None
-        try:
-            tk     = yf.Ticker(ns)
-            fin_df = tk.financials
-            bs_df  = tk.balance_sheet
-            net_inc = float(fin_df.loc["Net Income"].iloc[0])
-            eq_row  = "Stockholders Equity" if "Stockholders Equity" in bs_df.index else "Common Stock Equity"
-            equity  = float(bs_df.loc[eq_row].iloc[0])
-            if equity and equity != 0:
-                roe = round(net_inc / equity * 100, 2)
-        except Exception:
-            roe_raw = info.get("returnOnEquity")
-            if roe_raw is not None:
-                roe = round(float(roe_raw) * 100, 2)
+        company = info.get("shortName") or info.get("longName") or symbol
+        roe     = _safe_roe(tk, info)
 
         return {
             "symbol":        symbol,
@@ -164,7 +196,7 @@ def _analyze_one_ticker(symbol: str) -> dict | None:
         return None
 
 
-def _stage2_technical(candidates: list[str]) -> list[dict]:
+def _stage_technical(candidates: list[str]) -> list[dict]:
     results = []
     with ThreadPoolExecutor(max_workers=8) as ex:
         futures = {ex.submit(_analyze_one_ticker, sym): sym for sym in candidates}
@@ -175,7 +207,7 @@ def _stage2_technical(candidates: list[str]) -> list[dict]:
     return results
 
 
-# ── Stage 3: Claude reasoning ─────────────────────────────────────────────
+# ── Stage 3: AI reasoning (provider-agnostic, batched) ───────────────────
 
 SYSTEM_PROMPT = """\
 You are a senior equity analyst specialising in Indian markets (NSE/BSE).
@@ -192,8 +224,7 @@ STRICT RULES:
 """
 
 USER_PROMPT_TEMPLATE = """\
-Analyse the {n} candidate stocks below. Each has passed QARP (ROE>20%, D/E<0.5, P/E<15) \
-and/or Magic Formula (top EBIT/EV + ROC quartile) quantitative screens.
+Analyse the {n} candidate stocks below.
 
 {stock_json}
 
@@ -214,11 +245,16 @@ Return exactly this JSON structure (include ALL {n} symbols):
 """
 
 
-def _stage3_claude(enriched: list[dict]) -> list[dict]:
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY not set in environment")
+def _strip_json_fence(raw: str) -> str:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return raw.strip()
 
+
+def _llm_one_batch(provider: str, model: str, api_key: str, batch: list[dict]) -> dict[str, dict]:
     prompt_data = [
         {
             "symbol":        s["symbol"],
@@ -234,113 +270,158 @@ def _stage3_claude(enriched: list[dict]) -> list[dict]:
             "ema_stack":     s["ema_signal"],
             "adx":           s["adx_signal"],
         }
-        for s in enriched
+        for s in batch
     ]
-
     user_prompt = USER_PROMPT_TEMPLATE.format(
-        n=len(enriched),
+        n=len(batch),
         stock_json=json.dumps(prompt_data, indent=2),
     )
+    raw = call_llm(provider, model, api_key, SYSTEM_PROMPT, user_prompt)
+    parsed = json.loads(_strip_json_fence(raw))
+    return {a["symbol"]: a for a in parsed.get("analyses", [])}
 
-    client = genai.Client(api_key=api_key)
-    # Retry up to 3 times with exponential backoff for rate limit errors
-    last_err = None
-    for attempt in range(3):
+
+# ── Helpers shared with endpoints ────────────────────────────────────────
+
+def _read_user_key(auth: AuthUser) -> tuple[str, str, str]:
+    sb  = supabase_client(auth)
+    res = (sb.table("user_ai_keys")
+             .select("provider, model, api_key")
+             .eq("user_id", auth.user_id)
+             .limit(1)
+             .execute())
+    if not res.data:
+        raise HTTPException(status_code=400, detail="No AI provider configured. Save an API key first.")
+    row = res.data[0]
+    return row["provider"], row["model"], row["api_key"]
+
+
+def _parse_extras(extras: str | None) -> list[str]:
+    if not extras:
+        return []
+    return [e.strip().upper() for e in extras.split(",") if e.strip()]
+
+
+# ── Endpoints ────────────────────────────────────────────────────────────
+
+@router.get("/universes")
+def list_universes():
+    return ALLOWED_UNIVERSES
+
+
+@router.get("/cached")
+def get_cached(
+    universe: str = Query(...),
+    extras:   str | None = Query(None),
+    auth: AuthUser = Depends(get_current_user),
+):
+    """Return cached result for a (universe, extras, provider, model) combo, or 404."""
+    if universe not in ALLOWED_UNIVERSES:
+        raise HTTPException(status_code=400, detail=f"Unknown universe: {universe}")
+    provider, model, _ = _read_user_key(auth)
+    key = _cache_key(universe, _parse_extras(extras), provider, model)
+    cached = _load_cache(key)
+    if cached:
+        return {**cached, "from_cache": True}
+    raise HTTPException(status_code=404, detail="No cached analysis available")
+
+
+@router.get("/stream")
+def stream_ai_overview(
+    universe: str = Query(...),
+    extras:   str | None = Query(None),
+    force:    bool = False,
+    auth: AuthUser = Depends(get_current_user),
+):
+    """SSE stream of pipeline progress and final result.
+
+    Events:
+      {"type":"stage","stage":N,"status":"running|done"}
+      {"type":"batch","done":i,"total":t}
+      {"type":"result","data":{...}}
+      {"type":"error","message":"..."}
+    """
+    if universe not in ALLOWED_UNIVERSES:
+        raise HTTPException(status_code=400, detail=f"Unknown universe: {universe}")
+
+    provider, model, api_key = _read_user_key(auth)
+    extras_list = _parse_extras(extras)
+    key = _cache_key(universe, extras_list, provider, model)
+
+    def _sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload, default=str)}\n\n"
+
+    def _gen():
+        if not force:
+            cached = _load_cache(key)
+            if cached:
+                for n in (1, 2, 3):
+                    yield _sse({"type": "stage", "stage": n, "status": "done"})
+                yield _sse({"type": "result", "data": {**cached, "from_cache": True}})
+                return
+
         try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=user_prompt,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                ),
-            )
-            break
+            yield _sse({"type": "stage", "stage": 1, "status": "running"})
+            tickers = _resolve_universe(universe, extras_list)
+            if not tickers:
+                yield _sse({"type": "error", "message": "Universe is empty"})
+                return
+            yield _sse({"type": "stage", "stage": 1, "status": "done"})
+
+            yield _sse({"type": "stage", "stage": 2, "status": "running"})
+            enriched = _stage_technical(tickers)
+            if not enriched:
+                yield _sse({"type": "error", "message": "All tickers failed technical analysis"})
+                return
+            yield _sse({"type": "stage", "stage": 2, "status": "done"})
+
+            yield _sse({"type": "stage", "stage": 3, "status": "running"})
+            total_batches = (len(enriched) + LLM_BATCH_SIZE - 1) // LLM_BATCH_SIZE
+            yield _sse({"type": "batch", "done": 0, "total": total_batches})
+
+            ai_by_sym: dict[str, dict] = {}
+            for idx in range(total_batches):
+                batch = enriched[idx * LLM_BATCH_SIZE : (idx + 1) * LLM_BATCH_SIZE]
+                ai_by_sym.update(_llm_one_batch(provider, model, api_key, batch))
+                yield _sse({"type": "batch", "done": idx + 1, "total": total_batches})
+
+            final = []
+            for stock in enriched:
+                ai = ai_by_sym.get(stock["symbol"], {})
+                final.append({
+                    **stock,
+                    "quality_verdict": ai.get("quality_verdict", "Watch"),
+                    "conviction":      ai.get("conviction", "Low"),
+                    "entry_comment":   ai.get("entry_comment", "—"),
+                    "stop_comment":    ai.get("stop_comment", "—"),
+                    "target_comment":  ai.get("target_comment", "—"),
+                    "reasoning":       ai.get("reasoning", "Insufficient data for AI analysis."),
+                })
+            yield _sse({"type": "stage", "stage": 3, "status": "done"})
+
+            now = datetime.now(timezone.utc)
+            result = {
+                "stocks":          final,
+                "generated_at":    now.isoformat(),
+                "generated_at_ts": now.timestamp(),
+                "candidate_count": len(final),
+                "universe":        universe,
+                "extras":          extras_list,
+                "provider":        provider,
+                "model":           model,
+                "from_cache":      False,
+            }
+            _save_cache(key, result)
+            yield _sse({"type": "result", "data": result})
         except Exception as e:
-            last_err = e
-            if attempt < 2 and "429" in str(e):
-                wait = 45 + random.randint(0, 10)
-                print(f"Gemini 429 on attempt {attempt + 1}, retrying in {wait}s…")
-                time.sleep(wait)
-            else:
-                raise
-    raw = response.text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
+            yield _sse({"type": "error", "message": str(e)})
 
-    ai_resp   = json.loads(raw)
-    ai_by_sym = {a["symbol"]: a for a in ai_resp.get("analyses", [])}
-
-    merged = []
-    for stock in enriched:
-        ai = ai_by_sym.get(stock["symbol"], {})
-        merged.append({
-            **stock,
-            "quality_verdict": ai.get("quality_verdict", "Watch"),
-            "conviction":      ai.get("conviction", "Low"),
-            "entry_comment":   ai.get("entry_comment", "—"),
-            "stop_comment":    ai.get("stop_comment", "—"),
-            "target_comment":  ai.get("target_comment", "—"),
-            "reasoning":       ai.get("reasoning", "Insufficient data for AI analysis."),
-        })
-    return merged
-
-
-# ── Endpoint ──────────────────────────────────────────────────────────────
-
-@router.get("/analyze")
-def run_ai_overview(force: bool = False, check_only: bool = False):
-    # check_only: return cached data or 404 — never trigger the pipeline
-    if check_only:
-        cached = _load_cache()
-        if cached:
-            return {**cached, "from_cache": True}
-        raise HTTPException(status_code=404, detail="No cached analysis available")
-
-    if not force:
-        cached = _load_cache()
-        if cached:
-            return {**cached, "from_cache": True}
-
-    try:
-        universe = _get_nifty100_tickers()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch NIFTY 100: {e}")
-
-    if not universe:
-        raise HTTPException(status_code=500, detail="NIFTY 100 ticker list is empty")
-
-    try:
-        candidates = _stage1_screen(universe)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Screening failed: {e}")
-
-    if not candidates:
-        raise HTTPException(status_code=500, detail="No candidates passed value screens")
-
-    try:
-        enriched = _stage2_technical(candidates)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Technical analysis failed: {e}")
-
-    if not enriched:
-        raise HTTPException(status_code=500, detail="All candidates failed technical analysis")
-
-    try:
-        final = _stage3_claude(enriched)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Claude analysis failed: {e}")
-
-    now = datetime.now(timezone.utc)
-    result = {
-        "stocks":          final,
-        "generated_at":    now.isoformat(),
-        "generated_at_ts": now.timestamp(),
-        "candidate_count": len(final),
-        "universe_size":   len(universe),
-        "from_cache":      False,
-    }
-    _save_cache(result)
-    return result
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":     "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection":        "keep-alive",
+        },
+    )

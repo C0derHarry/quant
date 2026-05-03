@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import market, screener, fundamentals, volatility, portfolio, signals, news, earnings, backtest
-from api.routes import user_portfolios, tracker, technical, ai_overview
+from api.routes import user_portfolios, tracker, technical, ai_overview, ai_keys
 
 app = FastAPI(title="QuantHub API", version="1.0.0", docs_url="/api/docs")
 
@@ -34,6 +34,7 @@ app.include_router(user_portfolios.router,   prefix="/api/portfolios", tags=["po
 app.include_router(tracker.router,           prefix="/api/tracker",    tags=["tracker"])
 app.include_router(technical.router,         prefix="/api/technical",  tags=["technical"])
 app.include_router(ai_overview.router,       prefix="/api/ai-overview", tags=["ai-overview"])
+app.include_router(ai_keys.router,           prefix="/api/ai-keys",    tags=["ai-keys"])
 
 
 @app.get("/api/health")

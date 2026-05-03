@@ -2,11 +2,16 @@ import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Sparkles, Clock, RefreshCw, TrendingUp, TrendingDown,
-  Minus, ChevronDown, ChevronUp, AlertTriangle, Eye,
+  Minus, ChevronDown, ChevronUp, AlertTriangle, Eye, Check, KeyRound, Layers,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
-import { getAIOverview, type AIOverviewResult, type AIStockAnalysis } from '../lib/api'
+import {
+  getMyAIKey, getCachedAIOverview, streamAIOverview,
+  type AIOverviewResult, type AIStockAnalysis, type AIKeyInfo,
+} from '../lib/api'
 import Spinner, { ErrorState } from '../components/ui/Spinner'
+import ProviderSetup from '../components/ai/ProviderSetup'
+import UniverseSelector from '../components/ai/UniverseSelector'
 
 // ── Verdict config ────────────────────────────────────────────────────────
 
@@ -41,14 +46,6 @@ const CONVICTION_CFG: Record<Conviction, { dot: string }> = {
   Low:    { dot: 'bg-ink-disabled' },
 }
 
-const TECH_COLOR: Record<string, string> = {
-  'STRONG BUY':  'text-gain',
-  'BUY':         'text-gain',
-  'NEUTRAL':     'text-ink-muted',
-  'SELL':        'text-loss',
-  'STRONG SELL': 'text-loss',
-}
-
 // ── Small helpers ─────────────────────────────────────────────────────────
 
 function SignalPill({ signal, label }: { signal: string; label: string }) {
@@ -80,7 +77,6 @@ function StockCard({ stock }: { stock: AIStockAnalysis }) {
       'rounded-lg border p-4 transition-shadow hover:shadow-card',
       cfg.bg, cfg.border,
     )}>
-      {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -102,14 +98,12 @@ function StockCard({ stock }: { stock: AIStockAnalysis }) {
         </div>
       </div>
 
-      {/* Price */}
       {stock.current_price != null && (
         <p className="mt-2 font-mono text-lg font-semibold text-ink-primary">
           ₹{stock.current_price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
         </p>
       )}
 
-      {/* Metrics */}
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/40 pt-3 text-xs">
         {stock.pe != null && (
           <div>
@@ -138,15 +132,8 @@ function StockCard({ stock }: { stock: AIStockAnalysis }) {
             )}>{stock.rsi}</span>
           </div>
         )}
-        <span className={cn(
-          'ml-auto font-mono text-[10px] font-bold uppercase tracking-wide',
-          TECH_COLOR[stock.tech_verdict] ?? 'text-ink-muted',
-        )}>
-          {stock.tech_verdict}
-        </span>
       </div>
 
-      {/* Signal pills */}
       <div className="mt-2 flex flex-wrap gap-1.5">
         <SignalPill signal={stock.macd_signal} label="MACD" />
         <SignalPill signal={stock.ema_signal}  label="EMA"  />
@@ -154,7 +141,6 @@ function StockCard({ stock }: { stock: AIStockAnalysis }) {
         <SignalPill signal={stock.bb_signal}   label="BB"   />
       </div>
 
-      {/* Entry / Stop / Target */}
       <div className="mt-3 grid grid-cols-3 gap-2">
         {([
           { label: 'Entry',  val: stock.entry_comment,  color: 'text-gain'   },
@@ -168,7 +154,6 @@ function StockCard({ stock }: { stock: AIStockAnalysis }) {
         ))}
       </div>
 
-      {/* AI Reasoning */}
       <button
         onClick={() => setExpanded(e => !e)}
         className="mt-3 flex w-full items-center gap-2 text-left text-xs text-ink-muted transition-colors hover:text-ink-secondary"
@@ -189,13 +174,20 @@ function StockCard({ stock }: { stock: AIStockAnalysis }) {
 // ── Stage progress ────────────────────────────────────────────────────────
 
 const STAGES = [
-  { label: 'Loading NIFTY 100 universe',           est: '~5s'  },
-  { label: 'Running QARP + Magic Formula screens', est: '~20s' },
-  { label: 'Parallel technical analysis',          est: '~20s' },
-  { label: 'Claude AI reasoning',                  est: '~10s' },
+  { label: 'Loading universe',          est: '~5s'  },
+  { label: 'Parallel technical analysis', est: '~20s' },
+  { label: 'AI reasoning',              est: '~15s' },
 ]
 
-function StageProgress() {
+type StageStatus = 'pending' | 'running' | 'done'
+
+function StageProgress({
+  stageStatus,
+  batch,
+}: {
+  stageStatus: StageStatus[]
+  batch: { done: number; total: number } | null
+}) {
   const [elapsed, setElapsed] = useState(0)
   const ref = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -212,18 +204,47 @@ function StageProgress() {
         <span className="ml-auto font-mono text-xs text-ink-muted">{elapsed}s</span>
       </div>
       <div className="space-y-3">
-        {STAGES.map((stage, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border bg-bg-elevated">
-              <span className="font-mono text-[9px] text-ink-disabled">{i + 1}</span>
+        {STAGES.map((stage, i) => {
+          const status = stageStatus[i] ?? 'pending'
+          const isAIStage = i === 2
+          return (
+            <div key={i} className="flex items-center gap-3">
+              <div className={cn(
+                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
+                status === 'done'
+                  ? 'border-gain/50 bg-gain/15 text-gain'
+                  : status === 'running'
+                  ? 'border-accent/60 bg-accent/15 text-accent'
+                  : 'border-border bg-bg-elevated text-ink-disabled',
+              )}>
+                {status === 'done'
+                  ? <Check size={11} strokeWidth={3} />
+                  : status === 'running'
+                  ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                  : <span className="font-mono text-[9px]">{i + 1}</span>}
+              </div>
+              <div className="flex-1">
+                <p className={cn(
+                  'text-xs transition-colors',
+                  status === 'done'      ? 'text-ink-secondary'
+                  : status === 'running' ? 'text-ink-primary'
+                  : 'text-ink-disabled',
+                )}>
+                  {stage.label}
+                </p>
+                {isAIStage && status === 'running' && batch && batch.total > 0 && (
+                  <p className="mt-0.5 font-mono text-[10px] text-ink-disabled">
+                    Batch {batch.done} of {batch.total}
+                  </p>
+                )}
+              </div>
+              <span className="font-mono text-[10px] text-ink-disabled">{stage.est}</span>
             </div>
-            <p className="flex-1 text-xs text-ink-secondary">{stage.label}</p>
-            <span className="font-mono text-[10px] text-ink-disabled">{stage.est}</span>
-          </div>
-        ))}
+          )
+        })}
       </div>
       <p className="mt-5 text-xs text-ink-muted">
-        Usually takes 30–60 seconds · Results cached for 4 hours
+        Result is cached for 4 hours per universe + provider combo
       </p>
     </div>
   )
@@ -269,16 +290,21 @@ function FilterBar({
 
 // ── Results header ────────────────────────────────────────────────────────
 
-function ResultsHeader({ result, onRefresh, isRefreshing }: {
-  result: AIOverviewResult
-  onRefresh: () => void
-  isRefreshing: boolean
+function ResultsHeader({
+  result, keyInfo, onChangeUniverse, onChangeProvider, onRefresh, isRefreshing,
+}: {
+  result:           AIOverviewResult
+  keyInfo:          AIKeyInfo | null
+  onChangeUniverse: () => void
+  onChangeProvider: () => void
+  onRefresh:        () => void
+  isRefreshing:     boolean
 }) {
   const ago = Math.round((Date.now() - new Date(result.generated_at).getTime()) / 60_000)
   const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ${ago % 60}m ago`
 
   return (
-    <div className="flex flex-wrap items-center gap-4">
+    <div className="flex flex-wrap items-center gap-3">
       <div>
         <div className="flex items-center gap-2">
           <Clock size={12} className="text-ink-disabled" />
@@ -288,53 +314,138 @@ function ResultsHeader({ result, onRefresh, isRefreshing }: {
           </span>
         </div>
         <p className="mt-0.5 text-[10px] text-ink-disabled">
-          {result.candidate_count} stocks · NIFTY 100 universe ({result.universe_size} stocks)
+          {result.candidate_count} stocks · {result.universe}
+          {result.extras?.length ? ` + ${result.extras.length} extra` : ''}
+          {keyInfo && <span> · via <span className="font-mono text-ink-muted">{result.model}</span></span>}
         </p>
       </div>
-      <button
-        onClick={onRefresh}
-        disabled={isRefreshing}
-        className="ml-auto flex items-center gap-2 rounded border border-border px-3 py-1.5 text-xs text-ink-muted transition-colors hover:border-ink-muted hover:text-ink-secondary disabled:opacity-40"
-      >
-        <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
-        Force refresh
-      </button>
+
+      <div className="ml-auto flex items-center gap-2">
+        <button
+          onClick={onChangeUniverse}
+          className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-xs text-ink-muted transition-colors hover:border-ink-muted hover:text-ink-secondary"
+        >
+          <Layers size={11} />
+          Change universe
+        </button>
+        <button
+          onClick={onChangeProvider}
+          className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-xs text-ink-muted transition-colors hover:border-ink-muted hover:text-ink-secondary"
+        >
+          <KeyRound size={11} />
+          Change provider
+        </button>
+        <button
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-2 rounded border border-border px-3 py-1.5 text-xs text-ink-muted transition-colors hover:border-ink-muted hover:text-ink-secondary disabled:opacity-40"
+        >
+          <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
+          Force refresh
+        </button>
+      </div>
     </div>
   )
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────
 
+type Mode = 'setup-key' | 'pick-universe' | 'running' | 'results'
+
 export default function AIOverview() {
   const qc = useQueryClient()
   const [filter, setFilter] = useState<Filter>('All')
+  const [mode, setMode]     = useState<Mode | null>(null)
+  const [config, setConfig] = useState<{ universe: string; extras: string[] } | null>(null)
+  const [stageStatus, setStageStatus] = useState<StageStatus[]>(() => STAGES.map(() => 'pending'))
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
+  const [result, setResult] = useState<AIOverviewResult | null>(null)
 
-  // check_only=true: returns cached data or 404 — never triggers the pipeline
-  const { data: cachedResult, isLoading: isCacheLoading } = useQuery({
-    queryKey: ['ai-overview'],
-    queryFn:  () => getAIOverview(false, true),
-    staleTime: Infinity,
-    retry: false,
+  const { data: keyInfo, isLoading: isKeyLoading } = useQuery({
+    queryKey: ['ai-key'],
+    queryFn:  getMyAIKey,
+    retry:    false,
   })
 
-  const { mutate, isPending, error, reset } = useMutation({
-    mutationFn: (force: boolean) => getAIOverview(force, false),
+  // Resolve initial mode once we know whether a key is saved.
+  useEffect(() => {
+    if (isKeyLoading || mode) return
+    setMode(keyInfo ? 'pick-universe' : 'setup-key')
+  }, [isKeyLoading, keyInfo, mode])
+
+  // When user picks a universe, attempt cached fetch first; if hit, skip stream.
+  const cachedQuery = useQuery({
+    queryKey: ['ai-overview-cached', config?.universe, config?.extras?.join(',')],
+    queryFn:  () => getCachedAIOverview(config!.universe, config!.extras),
+    enabled:  !!config && mode === 'running',
+    retry:    false,
+    staleTime: 0,
+  })
+
+  const streamMut = useMutation({
+    mutationFn: async (force: boolean) => {
+      if (!config) throw new Error('No config')
+      setStageStatus(STAGES.map(() => 'pending'))
+      setBatch(null)
+      return streamAIOverview(config.universe, config.extras, force, (ev) => {
+        if (ev.type === 'stage') {
+          setStageStatus(prev => {
+            const next = [...prev]
+            next[ev.stage - 1] = ev.status
+            return next
+          })
+        } else if (ev.type === 'batch') {
+          setBatch({ done: ev.done, total: ev.total })
+        }
+      })
+    },
     onSuccess: (data) => {
-      qc.setQueryData(['ai-overview'], data)
+      setResult(data)
+      setMode('results')
       setFilter('All')
     },
   })
 
-  function handleRefresh() {
-    reset()
-    mutate(true)
+  // Once a config is set + cache check resolves: hit → results, miss → run stream.
+  useEffect(() => {
+    if (mode !== 'running' || !config) return
+    if (cachedQuery.isLoading) return
+    if (cachedQuery.data) {
+      setStageStatus(STAGES.map(() => 'done'))
+      setResult(cachedQuery.data)
+      setMode('results')
+    } else if (cachedQuery.isError && !streamMut.isPending && !streamMut.isSuccess) {
+      streamMut.mutate(false)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, config, cachedQuery.isLoading, cachedQuery.data, cachedQuery.isError])
+
+  function handleAnalyse(universe: string, extras: string[]) {
+    setConfig({ universe, extras })
+    setResult(null)
+    streamMut.reset()
+    setMode('running')
   }
 
-  const result = cachedResult ?? null
-  // isCacheLoading is only true briefly on first mount; treat cache 404 as "no cache" (not error)
-  const showIdle    = !isCacheLoading && !result && !isPending && !error
-  const showLoading = isPending
-  const showResults = !!result && !isPending
+  function handleForceRefresh() {
+    if (!config) return
+    streamMut.reset()
+    setResult(null)
+    setMode('running')
+    streamMut.mutate(true)
+  }
+
+  function handleChangeUniverse() {
+    setResult(null)
+    streamMut.reset()
+    setMode('pick-universe')
+  }
+
+  function handleChangeProvider() {
+    setResult(null)
+    streamMut.reset()
+    setMode('setup-key')
+  }
 
   const filtered = result?.stocks.filter(s =>
     filter === 'All' || s.quality_verdict === filter
@@ -354,46 +465,68 @@ export default function AIOverview() {
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-bg-elevated">
           <Sparkles size={16} className="text-accent" />
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className="text-xl font-semibold text-ink-primary">AI Overview</h1>
           <p className="mt-0.5 text-sm text-ink-muted">
-            NIFTY 100 screened → technical enriched → Claude AI reasoning · 4h cache
+            Pick a universe → technical enrichment → AI reasoning · 4h cache
           </p>
         </div>
+        {keyInfo && mode !== 'setup-key' && (
+          <div className="flex items-center gap-2 rounded border border-border bg-bg-surface px-3 py-1.5">
+            <KeyRound size={11} className="text-accent" />
+            <span className="text-[11px] text-ink-muted">
+              <span className="font-medium text-ink-secondary">{keyInfo.provider}</span>
+              <span className="mx-1.5 text-ink-disabled">·</span>
+              <span className="font-mono">{keyInfo.model}</span>
+              <span className="ml-1.5 text-ink-disabled">…{keyInfo.key_last4}</span>
+            </span>
+            <button
+              onClick={handleChangeProvider}
+              className="text-[10px] text-accent hover:underline"
+            >
+              change
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Idle: no cache, not loading */}
-      {showIdle && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-bg-surface py-24 text-center">
-          <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-accent/30 bg-accent/10">
-            <Sparkles size={28} className="text-accent" />
-          </div>
-          <h2 className="mb-2 text-lg font-semibold text-ink-primary">Let AI Analyze the Market</h2>
-          <p className="mb-1 max-w-sm text-sm text-ink-muted">
-            Screens NIFTY 100 with QARP + Magic Formula, runs 12 technical indicators per stock,
-            then asks Claude to reason about each one.
-          </p>
-          <p className="mb-8 text-xs text-ink-disabled">Takes 30–60 seconds · Results cached for 4 hours</p>
-          <button
-            onClick={() => mutate(false)}
-            className="flex items-center gap-3 rounded-lg border border-accent/50 bg-accent/10 px-8 py-4 text-base font-semibold text-accent transition-all hover:bg-accent/20"
-          >
-            <Sparkles size={18} />
-            Let AI Analyze
-          </button>
+      {isKeyLoading && (
+        <div className="flex items-center justify-center rounded-lg border border-border bg-bg-surface py-16">
+          <Spinner size={20} />
         </div>
       )}
 
-      {/* Loading */}
-      {showLoading && <StageProgress />}
+      {mode === 'setup-key' && (
+        <ProviderSetup
+          initialProvider={keyInfo?.provider}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ['ai-key'] })
+            setMode('pick-universe')
+          }}
+        />
+      )}
 
-      {/* Error */}
-      {error && !isPending && (
+      {mode === 'pick-universe' && (
+        <UniverseSelector onAnalyse={handleAnalyse} />
+      )}
+
+      {mode === 'running' && (
+        <StageProgress stageStatus={stageStatus} batch={batch} />
+      )}
+
+      {streamMut.error && mode === 'running' && (
         <div className="space-y-4">
-          <ErrorState message={(error as Error).message} />
-          <div className="flex justify-center">
+          <ErrorState message={(streamMut.error as Error).message} />
+          <div className="flex justify-center gap-2">
             <button
-              onClick={handleRefresh}
+              onClick={handleChangeUniverse}
+              className="flex items-center gap-2 rounded border border-border px-4 py-2 text-sm text-ink-secondary hover:text-ink-primary transition-colors"
+            >
+              <Layers size={14} />
+              Pick a different universe
+            </button>
+            <button
+              onClick={handleForceRefresh}
               className="flex items-center gap-2 rounded border border-border px-4 py-2 text-sm text-ink-secondary hover:text-ink-primary transition-colors"
             >
               <RefreshCw size={14} />
@@ -403,10 +536,16 @@ export default function AIOverview() {
         </div>
       )}
 
-      {/* Results */}
-      {showResults && result && (
+      {mode === 'results' && result && (
         <div className="space-y-4">
-          <ResultsHeader result={result} onRefresh={handleRefresh} isRefreshing={isPending} />
+          <ResultsHeader
+            result={result}
+            keyInfo={keyInfo ?? null}
+            onChangeUniverse={handleChangeUniverse}
+            onChangeProvider={handleChangeProvider}
+            onRefresh={handleForceRefresh}
+            isRefreshing={streamMut.isPending}
+          />
 
           <FilterBar active={filter} counts={counts} onChange={setFilter} />
 

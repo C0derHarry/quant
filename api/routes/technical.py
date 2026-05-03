@@ -25,6 +25,21 @@ def _safe_float(val) -> float | None:
         return None
 
 
+def _flatten_yf_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """yfinance can return a MultiIndex with price names at any level; pick the
+    level that contains OHLCV names so df['Close'] is always a Series."""
+    price_set = {"Open", "High", "Low", "Close", "Volume", "Adj Close"}
+    if isinstance(df.columns, pd.MultiIndex):
+        chosen = 0
+        for level in range(df.columns.nlevels):
+            if price_set & set(df.columns.get_level_values(level)):
+                chosen = level
+                break
+        df.columns = df.columns.get_level_values(chosen)
+    df = df.loc[:, ~df.columns.duplicated()]
+    return df
+
+
 def _evaluate_indicators(df: pd.DataFrame) -> list[dict]:
     close = df["Close"]
     last  = close.iloc[-1]
@@ -290,8 +305,7 @@ def analyze(ticker: str = Query(...), period: str = Query("1y")):
         if raw.empty:
             raise ValueError(f"No data returned for {ns}")
 
-        if isinstance(raw.columns, pd.MultiIndex):
-            raw.columns = raw.columns.get_level_values(0)
+        raw = _flatten_yf_columns(raw)
 
         if len(raw) < 60:
             raise ValueError(f"Need at least 60 bars; got {len(raw)} for {ns}")

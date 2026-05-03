@@ -358,11 +358,116 @@ export interface AIOverviewResult {
   generated_at:    string
   generated_at_ts: number
   candidate_count: number
-  universe_size:   number
+  universe:        string
+  extras:          string[]
+  provider:        string
+  model:           string
   from_cache:      boolean
 }
 
-export const getAIOverview = (force = false, checkOnly = false) =>
+// ── BYO API key catalog + per-user storage ─────────────────────────────
+
+export type ProviderId = 'google' | 'anthropic' | 'openai'
+
+export interface ProviderModel {
+  id:    string
+  label: string
+  tier:  'free' | 'paid'
+}
+
+export interface ProviderConfig {
+  label: string
+  key_url: string
+  free_tier_available: boolean
+  free_tier_note: string
+  instructions: string[]
+  models: ProviderModel[]
+}
+
+export interface AIKeyInfo {
+  provider:  ProviderId
+  model:     string
+  key_last4: string
+}
+
+export const getProviders = () =>
+  request<Record<ProviderId, ProviderConfig>>('/ai-keys/providers')
+
+export async function getMyAIKey(): Promise<AIKeyInfo | null> {
+  return request<AIKeyInfo | null>('/ai-keys')
+}
+
+export const saveMyAIKey = (body: { provider: ProviderId; model: string; api_key: string }) =>
+  request<{ ok: true }>('/ai-keys', { method: 'PUT', body: JSON.stringify(body) })
+
+export const deleteMyAIKey = () =>
+  request<{ ok: true }>('/ai-keys', { method: 'DELETE' })
+
+export const getAIUniverses = () => request<string[]>('/ai-overview/universes')
+
+export const getCachedAIOverview = (universe: string, extras: string[]) =>
   request<AIOverviewResult>(
-    `/ai-overview/analyze?force=${force}&check_only=${checkOnly}`
+    `/ai-overview/cached?universe=${encodeURIComponent(universe)}` +
+    (extras.length ? `&extras=${encodeURIComponent(extras.join(','))}` : ''),
   )
+
+export type AIOverviewStreamEvent =
+  | { type: 'stage';  stage: number; status: 'running' | 'done' }
+  | { type: 'batch';  done: number;  total: number }
+  | { type: 'result'; data: AIOverviewResult }
+  | { type: 'error';  message: string }
+
+export async function streamAIOverview(
+  universe: string,
+  extras: string[],
+  force: boolean,
+  onEvent: (ev: AIOverviewStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<AIOverviewResult> {
+  const auth   = await authHeader()
+  const params = new URLSearchParams({ universe, force: String(force) })
+  if (extras.length) params.set('extras', extras.join(','))
+  const res = await fetch(`${BASE}/ai-overview/stream?${params.toString()}`, {
+    headers: { ...auth },
+    signal,
+  })
+  if (!res.ok || !res.body) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? res.statusText)
+  }
+
+  const reader  = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: AIOverviewResult | null = null
+  let errMsg: string | null = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    // SSE frames are separated by a blank line ("\n\n").
+    let idx: number
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      const line = frame.split('\n').find(l => l.startsWith('data:'))
+      if (!line) continue
+      const json = line.slice(5).trim()
+      if (!json) continue
+      try {
+        const ev = JSON.parse(json) as AIOverviewStreamEvent
+        onEvent(ev)
+        if (ev.type === 'result') result = ev.data
+        if (ev.type === 'error')  errMsg = ev.message
+      } catch {
+        // ignore malformed frame
+      }
+    }
+  }
+
+  if (errMsg)  throw new Error(errMsg)
+  if (!result) throw new Error('Stream ended without a result')
+  return result
+}
