@@ -1,0 +1,160 @@
+"""
+Ivy Portfolio / GTAA (Faber 10-Month MA) — Standalone Backtest Script
+======================================================================
+Strategy:    {{STRATEGY_ID}}
+Generated:   {{GENERATED_DATE}}
+Backtest:    {{START_DATE}} → {{END_DATE}}
+Broker:      {{BROKER_ID}}
+
+Backtest KPIs (from QuantHub run):
+{{KPI_LINES}}
+
+Dependencies: pip install yfinance pandas numpy
+"""
+
+import pandas as pd
+import numpy as np
+import yfinance as yf
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+TICKERS     = {{TICKERS}}
+PARAMS      = {{PARAMS}}
+START_DATE  = "{{START_DATE}}"
+END_DATE    = "{{END_DATE}}"
+CAPITAL     = 1_000_000
+
+BROKERAGE = {
+    "id":           "{{BROKER_ID}}",
+    "delivery_pct": 0.001,
+    "stt":          0.001,
+    "exchange":     0.0000307,
+    "sebi_per_cr":  10.0,
+    "stamp_buy":    0.00015,
+    "gst":          0.18,
+    "slippage_bps": 3.0,
+}
+
+# ── Cost model ────────────────────────────────────────────────────────────────
+def compute_cost(value: float, side: str) -> float:
+    b  = BROKERAGE
+    bk = min(b["delivery_pct"] * value, 20.0)
+    st = b["stt"] * value
+    ex = b["exchange"] * value
+    se = b["sebi_per_cr"] * value / 1e7
+    sd = b["stamp_buy"] * value if side == "buy" else 0.0
+    gs = b["gst"] * (bk + ex + se)
+    sl = (b["slippage_bps"] / 10_000) * value
+    return bk + st + ex + se + sd + gs + sl
+
+# ── Data fetch ────────────────────────────────────────────────────────────────
+def fetch() -> pd.DataFrame:
+    raw = yf.download(TICKERS, start=START_DATE, end=END_DATE, auto_adjust=True, progress=False)
+    if isinstance(raw.columns, pd.MultiIndex):
+        prices = raw["Close"]
+    else:
+        prices = raw[["Close"]] if "Close" in raw.columns else raw
+    return prices.ffill(limit=5).dropna(axis=1, thresh=int(len(prices) * 0.8))
+
+# ── Signal generation ─────────────────────────────────────────────────────────
+def generate_signals(prices: pd.DataFrame) -> pd.DataFrame:
+    ma_months   = int(PARAMS.get("ma_months",    10))
+    cash_ticker = str(PARAMS.get("cash_ticker",  "LIQUIDBEES.NS"))
+    min_in      = int(PARAMS.get("min_assets_in", 1))
+    ma_days     = ma_months * 21
+
+    lagged    = prices.shift(1)
+    reb_dates = prices.resample("ME").last().index
+    asset_cols = [c for c in prices.columns if c != cash_ticker]
+
+    records = {}
+    for rdate in reb_dates:
+        idx = lagged.index.get_indexer([rdate], method="pad")[0]
+        if idx < 0 or idx < ma_days:
+            continue
+        row    = lagged.iloc[idx]
+        ma_w   = lagged.iloc[max(0, idx - ma_days):idx]
+        in_mkt = []
+        for col in asset_cols:
+            if col not in row.index or pd.isna(row[col]):
+                continue
+            sma = ma_w[col].mean()
+            if row[col] > sma:
+                in_mkt.append(col)
+
+        target: dict = {}
+        if len(in_mkt) < min_in:
+            if cash_ticker in prices.columns:
+                target[cash_ticker] = 1.0
+        else:
+            eq_w = 1.0 / len(asset_cols)
+            for col in asset_cols:
+                if col in in_mkt:
+                    target[col] = eq_w
+                elif cash_ticker in prices.columns:
+                    target[cash_ticker] = target.get(cash_ticker, 0.0) + eq_w
+
+        records[rdate] = pd.Series(target)
+
+    return pd.DataFrame(records).T.reindex(columns=prices.columns).fillna(0.0)
+
+# ── Simulation ────────────────────────────────────────────────────────────────
+def run(prices: pd.DataFrame, weights_df: pd.DataFrame) -> pd.DataFrame:
+    daily_rets = prices.pct_change().fillna(0.0)
+    equity     = float(CAPITAL)
+    cur_w: dict = {}
+    rows        = []
+    total_cost  = 0.0
+
+    reb_set = set(weights_df.index)
+    for day in prices.index:
+        if day in reb_set:
+            target = weights_df.loc[day].reindex(prices.columns).fillna(0.0)
+            for tkr in prices.columns:
+                delta = float(target.get(tkr, 0.0)) - float(cur_w.get(tkr, 0.0))
+                if abs(delta) > 1e-4:
+                    side = "buy" if delta > 0 else "sell"
+                    cost = compute_cost(abs(delta) * equity, side)
+                    equity -= cost
+                    total_cost += cost
+            cur_w = target.to_dict()
+
+        port_ret = sum(cur_w.get(t, 0.0) * float(daily_rets.loc[day, t] if t in daily_rets.columns else 0.0) for t in cur_w)
+        equity  *= (1.0 + port_ret)
+        rows.append({"date": day, "equity": equity, "total_cost": total_cost})
+
+    return pd.DataFrame(rows).set_index("date")
+
+# ── KPIs ──────────────────────────────────────────────────────────────────────
+def print_kpis(result: pd.DataFrame) -> None:
+    eq    = result["equity"]
+    rets  = eq.pct_change().dropna()
+    years = len(eq) / 252
+    cagr  = (eq.iloc[-1] / eq.iloc[0]) ** (1 / years) - 1
+    sharpe= np.sqrt(252) * rets.mean() / rets.std() if rets.std() > 0 else 0
+    mdd   = ((eq - eq.cummax()) / eq.cummax()).min()
+    cost  = result["total_cost"].iloc[-1]
+
+    print(f"\n{'='*50}")
+    print(f"Ivy Portfolio / GTAA — Backtest Results")
+    print(f"{'='*50}")
+    print(f"  CAGR:          {cagr*100:.2f}%")
+    print(f"  Sharpe Ratio:  {sharpe:.3f}")
+    print(f"  Max Drawdown:  {mdd*100:.2f}%")
+    print(f"  Total Cost:    ₹{cost:,.2f}")
+    print(f"  Final Value:   ₹{eq.iloc[-1]:,.2f}  (started ₹{CAPITAL:,})")
+    print(f"{'='*50}\n")
+
+# ── Broker integration ────────────────────────────────────────────────────────
+{{BROKER_STUB}}
+
+def main():
+    print("Fetching price data...")
+    prices     = fetch()
+    print(f"Got {len(prices.columns)} tickers × {len(prices)} trading days")
+    weights_df = generate_signals(prices)
+    print(f"Generated {len(weights_df)} rebalance signals")
+    result     = run(prices, weights_df)
+    print_kpis(result)
+
+if __name__ == "__main__":
+    main()
