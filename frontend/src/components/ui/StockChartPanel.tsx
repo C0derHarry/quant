@@ -64,17 +64,23 @@ export default function StockChartPanel({ stock, onClose }: Props) {
     staleTime: 60_000,
   })
 
+  // Replace the last bar's close with the live `stock.price` so the chart
+  // line trails real-time. Re-runs every poll tick because `stock.price`
+  // is in the deps.
   const chartData = useMemo(() => {
     const rows = ohlcvRaw?.[stock.symbol] ?? []
+    let scoped = rows
     if (period === '1D') {
-      // find the last trading date and filter to only that day's bars
       if (rows.length === 0) return []
       const lastDate = rows[rows.length - 1].date.slice(0, 10)
-      const dayRows = rows.filter(r => r.date.startsWith(lastDate))
-      return dayRows.map(r => ({ t: formatLabel(r.date, period), close: r.close }))
+      scoped = rows.filter(r => r.date.startsWith(lastDate))
     }
-    return rows.map(r => ({ t: formatLabel(r.date, period), close: r.close }))
-  }, [ohlcvRaw, stock.symbol, period])
+    const n = scoped.length
+    return scoped.map((r, i) => ({
+      t:     formatLabel(r.date, period),
+      close: i === n - 1 ? stock.price : r.close,
+    }))
+  }, [ohlcvRaw, stock.symbol, stock.price, period])
 
   // displayPrice is always stock.price (live market value) so it never flashes
   // or shifts when switching periods. Change is computed from chartData[0] → stock.price

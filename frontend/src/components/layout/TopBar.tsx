@@ -39,7 +39,7 @@ export default function TopBar() {
   const open = data?.is_open ?? false
 
   return (
-    <header className="fixed top-0 right-0 left-[220px] z-20 flex h-[56px] items-center justify-between border-b border-border bg-bg-surface/90 px-6 backdrop-blur-sm">
+    <header className="fixed top-0 right-0 left-14 z-20 flex h-[56px] items-center justify-between border-b border-border bg-bg-surface/90 px-6 backdrop-blur-sm">
       <h1 className="text-md font-semibold text-ink-primary">{title}</h1>
 
       <div className="flex items-center gap-4">

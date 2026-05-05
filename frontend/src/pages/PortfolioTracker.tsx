@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Trash2, TrendingUp, TrendingDown, BarChart2, Minus, ExternalLink } from 'lucide-react'
 import {
@@ -284,37 +284,51 @@ function TrackerDetail({ tracker: t }: { tracker: TrackerResult }) {
   const up   = m.total_return >= 0
   const date = new Date(t.invested_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
+  // Y-axis domain: symmetric ±N% in 10% increments, minimum ±10%
+  const yDomain = useMemo(() => {
+    const vals = t.series.flatMap(s =>
+      [s.portfolio, s.benchmark].filter((v): v is number => v != null)
+    )
+    if (vals.length === 0) return [0.9, 1.1]
+    const maxDev = Math.max(...vals.map(v => Math.abs(v - 1)))
+    const step   = Math.max(Math.ceil(maxDev / 0.1) * 0.1, 0.1)
+    return [parseFloat((1 - step).toFixed(2)), parseFloat((1 + step).toFixed(2))]
+  }, [t.series])
+
   return (
     <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-ink-primary">{t.portfolio_name}</h2>
-          <p className="text-xs text-ink-muted">Invested since {date} · {m.days_held} days</p>
+          <p className="text-xs text-ink-muted">
+            Invested since {date} · {m.days_held} days
+            {t.capital != null && ` · ₹${t.capital.toLocaleString('en-IN')} capital`}
+          </p>
         </div>
         <div className={cn('flex items-center gap-1.5 font-mono text-2xl font-semibold',
           up ? 'text-gain' : 'text-loss')}>
           {up ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
-          {up ? '+' : ''}{m.total_return.toFixed(2)}%
+          {(m.total_return ?? 0).toFixed(2)}%
         </div>
       </div>
 
       {/* Metrics */}
       <div className="grid grid-cols-5 gap-3">
         <MetricCard size="sm" label="Total Return"
-          value={`${m.total_return >= 0 ? '+' : ''}${fmtPct(m.total_return)}`}
+          value={`${fmt(m.total_return)}%`}
           accent={up ? 'gain' : 'loss'}
           tooltip="Cumulative portfolio return since investment date." />
         <MetricCard size="sm" label="CAGR"
-          value={fmtPct(m.cagr)}
-          accent={m.cagr >= 0 ? 'gain' : 'loss'}
-          tooltip="Annualised compound growth rate." />
+          value={m.cagr != null ? fmtPct(m.cagr) : '— <30d'}
+          accent={(m.cagr ?? 0) >= 0 ? 'gain' : 'loss'}
+          tooltip="Annualised compound growth rate. Requires 30+ trading days." />
         <MetricCard size="sm" label="Annual Vol"
-          value={fmtPct(m.annual_vol)}
-          tooltip="Annualised standard deviation of daily returns." />
+          value={m.annual_vol != null ? fmtPct(m.annual_vol) : '— <30d'}
+          tooltip="Annualised standard deviation of daily returns. Requires 30+ trading days." />
         <MetricCard size="sm" label="Sharpe"
-          value={fmt(m.sharpe)}
-          tooltip="Risk-adjusted return (CAGR / annual volatility)." />
+          value={m.sharpe != null ? fmt(m.sharpe) : '— <30d'}
+          tooltip="Risk-adjusted return (CAGR / annual volatility). Requires 30+ trading days." />
         <MetricCard size="sm" label="Max Drawdown"
           value={fmtPct(m.max_drawdown)}
           accent="loss"
@@ -339,6 +353,7 @@ function TrackerDetail({ tracker: t }: { tracker: TrackerResult }) {
               tick={{ fill: '#7D8590', fontSize: 10 }} tickLine={false} axisLine={false}
               interval="preserveStartEnd" />
             <YAxis
+              domain={yDomain}
               tick={{ fill: '#7D8590', fontSize: 10 }} tickLine={false} axisLine={false}
               width={52} tickFormatter={v => `${((v - 1) * 100).toFixed(0)}%`} />
             <Tooltip
@@ -370,11 +385,16 @@ function TrackerDetail({ tracker: t }: { tracker: TrackerResult }) {
                 <span className="font-mono text-sm font-semibold text-ink-primary">
                   {tp.ticker.replace('.NS', '').replace('.BO', '')}
                 </span>
-                <span className="text-xs text-ink-disabled">{tp.weight.toFixed(1)}% weight</span>
+                <span className="text-xs text-ink-disabled">{(tp.weight ?? 0).toFixed(1)}%</span>
+                {tp.allocation != null && (
+                  <span className="text-xs text-ink-disabled">
+                    ₹{tp.allocation.toLocaleString('en-IN')}
+                  </span>
+                )}
               </div>
               <span className={cn('num font-mono text-sm font-semibold',
-                tp.return >= 0 ? 'text-gain' : 'text-loss')}>
-                {tp.return >= 0 ? '+' : ''}{tp.return.toFixed(2)}%
+                (tp.return ?? 0) >= 0 ? 'text-gain' : 'text-loss')}>
+                {(tp.return ?? 0) >= 0 ? '+' : ''}{(tp.return ?? 0).toFixed(2)}%
               </span>
             </div>
           ))}

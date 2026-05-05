@@ -16,7 +16,7 @@ import StockChartPanel from '../components/ui/StockChartPanel'
 import { TrendingUp, TrendingDown, ArrowRight, Search, ChevronDown } from 'lucide-react'
 import { cn } from '../lib/utils'
 
-const REFRESH = isMarketOpen() ? 10_000 : 0
+const REFRESH = isMarketOpen() ? 1_000 : 0
 
 const MOVER_INDICES = [
   'NIFTY 50', 'NIFTY NEXT 50', 'NIFTY 100',

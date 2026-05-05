@@ -39,6 +39,7 @@ import EarningsSurprise  from './pages/EarningsSurprise'
 import PortfolioTracker  from './pages/PortfolioTracker'
 import TechnicalAnalysis from './pages/TechnicalAnalysis'
 import AIOverview        from './pages/AIOverview'
+import Backtesting       from './pages/Backtesting'
 
 export default function App() {
   return (
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="/tracker"      element={<PortfolioTracker />} />
             <Route path="/technical"    element={<TechnicalAnalysis />} />
             <Route path="/ai-overview"  element={<AIOverview />} />
+            <Route path="/backtesting"  element={<Backtesting />} />
           </Route>
         </Route>
       </Routes>
