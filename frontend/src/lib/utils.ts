@@ -5,14 +5,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function fmt(n: number, decimals = 2): string {
+export function fmt(n: number | null | undefined, decimals = 2): string {
+  if (n == null || !isFinite(n)) return '—'
   return n.toLocaleString('en-IN', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   })
 }
 
-export function fmtPct(n: number, decimals = 2): string {
+export function fmtPct(n: number | null | undefined, decimals = 2): string {
+  if (n == null || !isFinite(n)) return '—'
   const sign = n >= 0 ? '+' : ''
   return `${sign}${fmt(n, decimals)}%`
 }

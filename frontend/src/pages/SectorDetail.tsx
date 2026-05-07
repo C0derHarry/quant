@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getSectorStocks } from '../lib/api'
+import { getSectorStocks, getSectorQuotes } from '../lib/api'
 import DataTable, { Column } from '../components/ui/DataTable'
 import { PageLoader, ErrorState } from '../components/ui/Spinner'
 import { fmtPct, fmtLargeNum } from '../lib/utils'
@@ -11,7 +11,7 @@ import type { SectorStock } from '../lib/api'
 import { isMarketOpen } from '../lib/utils'
 import StockChartPanel from '../components/ui/StockChartPanel'
 
-const REFRESH = isMarketOpen() ? 10_000 : 0
+const REFRESH = isMarketOpen() ? 1_000 : 0
 
 function PctCell({ pct }: { pct: number }) {
   return (
@@ -73,13 +73,34 @@ const COLS: Column<SectorStock>[] = [
 export default function SectorDetail() {
   const { name } = useParams<{ name: string }>()
   const decoded  = decodeURIComponent(name ?? '')
-  const [selectedStock, setSelectedStock] = useState<SectorStock | null>(null)
+  // Track only the symbol of the selected row; pick the live merged row by symbol
+  // each render so the chart panel reflects every poll tick.
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
 
-  const { data, isLoading, error } = useQuery({
-    queryKey:        ['sector-stocks', decoded],
-    queryFn:         () => getSectorStocks(decoded),
-    refetchInterval: REFRESH,
+  // Static fields (symbol, company name, 52W range) — fetched once per session.
+  const { data: stocks, isLoading, error } = useQuery({
+    queryKey:  ['sector-stocks', decoded],
+    queryFn:   () => getSectorStocks(decoded),
+    staleTime: Infinity,
   })
+
+  // Live price/change/volume — polled every second during market hours.
+  const { data: quotes } = useQuery({
+    queryKey:        ['sector-quotes', decoded],
+    queryFn:         () => getSectorQuotes(decoded),
+    refetchInterval: REFRESH,
+    enabled:         !!stocks,
+  })
+
+  // Overlay live quotes onto the static rows; re-sort by live pct_change.
+  const data = useMemo(() => {
+    if (!stocks) return undefined
+    const merged = stocks.map(s => {
+      const q = quotes?.[s.symbol]
+      return q ? { ...s, ...q } : s
+    })
+    return merged.sort((a, b) => b.pct_change - a.pct_change)
+  }, [stocks, quotes])
 
   const gainers = (data ?? []).filter(s => s.pct_change > 0).length
   const losers  = (data ?? []).filter(s => s.pct_change < 0).length
@@ -122,16 +143,20 @@ export default function SectorDetail() {
           columns={COLS}
           data={data}
           keyFn={r => r.symbol}
-          onRowClick={setSelectedStock}
+          onRowClick={r => setSelectedSymbol(r.symbol)}
         />
       )}
 
-      {selectedStock && (
-        <StockChartPanel
-          stock={selectedStock}
-          onClose={() => setSelectedStock(null)}
-        />
-      )}
+      {selectedSymbol && data && (() => {
+        const live = data.find(r => r.symbol === selectedSymbol)
+        if (!live) return null
+        return (
+          <StockChartPanel
+            stock={live}
+            onClose={() => setSelectedSymbol(null)}
+          />
+        )
+      })()}
     </div>
   )
 }

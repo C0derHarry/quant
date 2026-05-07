@@ -7,7 +7,7 @@ export default function Layout() {
     <div className="min-h-screen bg-bg-base">
       <Sidebar />
       <TopBar />
-      <main className="pl-[220px] pt-[56px]">
+      <main className="pl-14 pt-[56px]">
         <div className="page-enter min-h-[calc(100vh-56px)] p-6">
           <Outlet />
         </div>

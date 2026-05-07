@@ -1,3 +1,4 @@
+import time as _time
 import pandas as pd
 import yfinance as yf
 import pandas_market_calendars as mcal
@@ -6,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from nsetools import Nse
 from concurrent.futures import ThreadPoolExecutor
+from growwapi import GrowwAPI
 from core.data.groww_client import GrowwError, GROWW_SNAPSHOTS, get_groww_client, ticker_snapshot_from_quote
 
 router   = APIRouter()
@@ -112,6 +114,120 @@ def get_sector_stocks(sector_name: str):
         except Exception:
             continue
     return sorted(rows, key=lambda x: x["pct_change"], reverse=True)
+
+
+# ── Live quotes via Groww bulk LTP ─────────────────────────────────────
+#
+# Strategy: Groww's get_ltp() is the lightest live-data API (up to 50 symbols
+# per call, returns just the last traded price). We pair it with a per-sector
+# prev_close cache (refreshed hourly via nsetools) so we can compute
+# change / pct_change server-side without hitting NSE every poll.
+
+_PREV_CLOSE_TTL = 3600                                # 1h
+_prev_close_cache: dict[str, dict[str, float]] = {}   # sector → {sym: prev_close}
+_prev_close_ts:    dict[str, float]            = {}   # sector → last refresh ts
+
+
+def _refresh_prev_close(sector_name: str) -> dict[str, float]:
+    raw = nse.get_stock_quote_in_index(sector_name)
+    pc: dict[str, float] = {}
+    for s in raw:
+        sym = s.get("symbol", "")
+        if not sym:
+            continue
+        try:
+            last = float(s.get("lastPrice", 0))
+            pct  = float(s.get("pChange", 0))
+            denom = 1 + pct / 100
+            if last and denom:
+                pc[sym] = last / denom
+        except Exception:
+            continue
+    return pc
+
+
+def _get_prev_close(sector_name: str) -> dict[str, float]:
+    now = _time.time()
+    if (sector_name not in _prev_close_cache
+        or now - _prev_close_ts.get(sector_name, 0) > _PREV_CLOSE_TTL):
+        _prev_close_cache[sector_name] = _refresh_prev_close(sector_name)
+        _prev_close_ts[sector_name]    = now
+    return _prev_close_cache[sector_name]
+
+
+def _groww_quote_one(sym: str) -> dict | None:
+    """Single-symbol live quote via Groww. Returns price/change/pct/volume."""
+    try:
+        client  = get_groww_client()
+        payload = client.get_quote(
+            trading_symbol=sym,
+            exchange=GrowwAPI.EXCHANGE_NSE,
+            segment=GrowwAPI.SEGMENT_CASH,
+        )
+        return {
+            "price":      float(payload.get("last_price", 0)),
+            "change":     float(payload.get("day_change", 0)),
+            "pct_change": float(payload.get("day_change_perc", 0)),
+            "volume":     int(payload.get("volume", 0) or 0),
+        }
+    except Exception:
+        return None
+
+
+def _groww_quotes_bulk(symbols: list[str], max_workers: int = 16) -> dict[str, dict]:
+    """Parallel get_quote() across symbols. Returns {symbol: {price, change, pct, volume}}.
+
+    Each get_quote payload includes day_change/day_change_perc and volume directly,
+    so no prev_close cache is needed on this path. Raises if every call fails."""
+    out: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_groww_quote_one, s): s for s in symbols}
+        for fut in futures:
+            sym = futures[fut]
+            r   = fut.result()
+            if r is not None:
+                out[sym] = r
+    if not out:
+        raise GrowwError("All Groww get_quote calls failed")
+    return out
+
+
+def _nsetools_quotes_fallback(sector_name: str) -> dict[str, dict]:
+    raw = nse.get_stock_quote_in_index(sector_name)
+    quotes: dict[str, dict] = {}
+    for s in raw:
+        sym = s.get("symbol", "")
+        if not sym:
+            continue
+        try:
+            quotes[sym] = {
+                "price":      float(s.get("lastPrice", 0)),
+                "change":     float(s.get("change", 0)),
+                "pct_change": float(s.get("pChange", 0)),
+                "volume":     int(s.get("totalTradedVolume", 0) or 0),
+            }
+        except Exception:
+            continue
+    return quotes
+
+
+@router.get("/sector/{sector_name}/quotes")
+def get_sector_quotes(sector_name: str):
+    """Live quotes for polling. Returns {symbol: {price, change, pct_change, volume}}.
+
+    Primary: Groww parallel get_quote() (full live data including volume).
+    Fallback: nsetools (used if Groww auth fails / network errors / rate-limited)."""
+    try:
+        prev_close = _get_prev_close(sector_name)  # universe resolution + 1h cache
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    if not prev_close:
+        return {}
+
+    try:
+        return _groww_quotes_bulk(list(prev_close.keys()))
+    except Exception:
+        return _nsetools_quotes_fallback(sector_name)
 
 
 _ENRICH_INDICES = [

@@ -26,6 +26,14 @@ export const getIndices  = () => request<Record<string, TickerSnapshot>>('/marke
 export const getSectors  = () => request<Record<string, TickerSnapshot>>('/market/sectors')
 export const getSectorStocks = (name: string) =>
   request<SectorStock[]>(`/market/sector/${encodeURIComponent(name)}/stocks`)
+export interface SectorQuote {
+  price:      number
+  change:     number
+  pct_change: number
+  volume:     number
+}
+export const getSectorQuotes = (name: string) =>
+  request<Record<string, SectorQuote>>(`/market/sector/${encodeURIComponent(name)}/quotes`)
 export const getAllSymbols = (exchange = 'NSE') =>
   request<SymbolEntry[]>(`/market/symbols?exchange=${exchange}`)
 export const getSectorNames = () => request<string[]>('/market/sector-names')
@@ -292,13 +300,14 @@ export const saveBacktestResult = (portfolioId: string, result: unknown) =>
 // ── Tracker ───────────────────────────────────────────────────────
 export interface TrackerSeries { date: string; portfolio: number; benchmark: number | null }
 export interface TrackerMetrics {
-  total_return: number; cagr: number; annual_vol: number
-  sharpe: number; max_drawdown: number; days_held: number
+  total_return: number; cagr: number | null; annual_vol: number | null
+  sharpe: number | null; max_drawdown: number; days_held: number
 }
-export interface TickerPerf { ticker: string; return: number; weight: number }
+export interface TickerPerf { ticker: string; return: number; weight: number; allocation: number | null }
 export interface TrackerResult {
   portfolio_name:     string
   invested_at:        string
+  capital:            number | null
   tickers:            string[]
   series:             TrackerSeries[]
   metrics:            TrackerMetrics
@@ -325,3 +334,325 @@ export interface PortfolioNewsFeed {
 export type ImpactData =
   | { market_open: true; current_price: number; change: number; change_pct: number; quote_time: string }
   | { market_open: false }
+
+// ── AI Overview ───────────────────────────────────────────────────────────
+
+export interface AIStockAnalysis {
+  symbol:        string
+  company_name:  string
+  sector:        string
+  current_price: number | null
+  pe:            number | null
+  roe:           number | null
+  de:            number | null
+  tech_verdict:  'STRONG BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG SELL'
+  bullish_count: number
+  bearish_count: number
+  neutral_count: number
+  rsi:           number | null
+  macd_signal:   'Bullish' | 'Bearish' | 'Neutral'
+  ema_signal:    'Bullish' | 'Bearish' | 'Neutral'
+  adx_signal:    'Bullish' | 'Bearish' | 'Neutral'
+  bb_signal:     'Bullish' | 'Bearish' | 'Neutral'
+  quality_verdict: 'Genuinely Discounted' | 'Value Trap' | 'Overvalued' | 'Watch'
+  conviction:      'High' | 'Medium' | 'Low'
+  entry_comment:   string
+  stop_comment:    string
+  target_comment:  string
+  reasoning:       string
+}
+
+export interface AIOverviewResult {
+  stocks:          AIStockAnalysis[]
+  generated_at:    string
+  generated_at_ts: number
+  candidate_count: number
+  universe:        string
+  extras:          string[]
+  provider:        string
+  model:           string
+  from_cache:      boolean
+}
+
+// ── BYO API key catalog + per-user storage ─────────────────────────────
+
+export type ProviderId = 'google' | 'anthropic' | 'openai'
+
+export interface ProviderModel {
+  id:    string
+  label: string
+  tier:  'free' | 'paid'
+}
+
+export interface ProviderConfig {
+  label: string
+  key_url: string
+  free_tier_available: boolean
+  free_tier_note: string
+  instructions: string[]
+  models: ProviderModel[]
+}
+
+export interface AIKeyInfo {
+  provider:  ProviderId
+  model:     string
+  key_last4: string
+}
+
+export const getProviders = () =>
+  request<Record<ProviderId, ProviderConfig>>('/ai-keys/providers')
+
+export async function getMyAIKey(): Promise<AIKeyInfo | null> {
+  return request<AIKeyInfo | null>('/ai-keys')
+}
+
+export const saveMyAIKey = (body: { provider: ProviderId; model: string; api_key: string }) =>
+  request<{ ok: true }>('/ai-keys', { method: 'PUT', body: JSON.stringify(body) })
+
+export const deleteMyAIKey = () =>
+  request<{ ok: true }>('/ai-keys', { method: 'DELETE' })
+
+export const getAIUniverses = () => request<string[]>('/ai-overview/universes')
+
+export const getCachedAIOverview = (universe: string, extras: string[]) =>
+  request<AIOverviewResult>(
+    `/ai-overview/cached?universe=${encodeURIComponent(universe)}` +
+    (extras.length ? `&extras=${encodeURIComponent(extras.join(','))}` : ''),
+  )
+
+export type AIOverviewStreamEvent =
+  | { type: 'stage';  stage: number; status: 'running' | 'done' }
+  | { type: 'batch';  done: number;  total: number }
+  | { type: 'result'; data: AIOverviewResult }
+  | { type: 'error';  message: string }
+
+export async function streamAIOverview(
+  universe: string,
+  extras: string[],
+  force: boolean,
+  onEvent: (ev: AIOverviewStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<AIOverviewResult> {
+  const auth   = await authHeader()
+  const params = new URLSearchParams({ universe, force: String(force) })
+  if (extras.length) params.set('extras', extras.join(','))
+  const res = await fetch(`${BASE}/ai-overview/stream?${params.toString()}`, {
+    headers: { ...auth },
+    signal,
+  })
+  if (!res.ok || !res.body) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? res.statusText)
+  }
+
+  const reader  = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: AIOverviewResult | null = null
+  let errMsg: string | null = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    // SSE frames are separated by a blank line ("\n\n").
+    let idx: number
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      const line = frame.split('\n').find(l => l.startsWith('data:'))
+      if (!line) continue
+      const json = line.slice(5).trim()
+      if (!json) continue
+      try {
+        const ev = JSON.parse(json) as AIOverviewStreamEvent
+        onEvent(ev)
+        if (ev.type === 'result') result = ev.data
+        if (ev.type === 'error')  errMsg = ev.message
+      } catch {
+        // ignore malformed frame
+      }
+    }
+  }
+
+  if (errMsg)  throw new Error(errMsg)
+  if (!result) throw new Error('Stream ended without a result')
+  return result
+}
+
+// ── Strategies / Backtesting ──────────────────────────────────────
+
+export interface ParamSpec {
+  name:     string
+  type:     'int' | 'float' | 'enum' | 'bool'
+  default:  unknown
+  label:    string
+  help:     string
+  min?:     number
+  max?:     number
+  choices?: string[]
+}
+
+export interface StrategySpec {
+  id:                    string
+  label:                 string
+  description:           string
+  reference:             string
+  requires_fundamentals: boolean
+  basic_params:          ParamSpec[]
+  advanced_params:       ParamSpec[]
+}
+
+export interface BrokerageSpec {
+  id:           string
+  label:        string
+  delivery_pct: number
+  dp_per_sell:  number
+  source_url:   string
+}
+
+export interface BacktestKPIs {
+  cagr:            number
+  benchmark_cagr:  number
+  alpha:           number
+  sharpe:          number
+  sortino:         number
+  calmar:          number
+  max_drawdown:    number
+  hit_rate:        number
+  avg_turnover:    number
+  total_cost_inr:  number
+  n_trades:        number
+  n_rebalances:    number
+}
+
+export interface BacktestResult {
+  strategy_id:               string
+  equity_curve:              { date: string; value: number }[]
+  benchmark_curve:           { date: string; value: number }[]
+  drawdown_curve:            { date: string; dd_pct: number }[]
+  trade_log:                 BacktestTrade[]
+  kpis:                      BacktestKPIs
+  params:                    Record<string, unknown>
+  universe:                  string
+  start_date:                string
+  end_date:                  string
+  brokerage_id:              string
+  total_cost:                number
+  survivorship_bias_warning: boolean
+  tickers:                   string[]
+  run_id?:                   string
+}
+
+export interface BacktestTrade {
+  date:   string
+  ticker: string
+  side:   'buy' | 'sell'
+  value:  number
+  cost_breakdown: Record<string, number>
+}
+
+export type BacktestStreamEvent =
+  | { type: 'stage';  stage: number; status: 'running' | 'done'; label?: string; n_tickers?: number; n_rebalances?: number }
+  | { type: 'result'; data: BacktestResult }
+  | { type: 'error';  message: string }
+
+export const getStrategyCatalog  = () => request<StrategySpec[]>('/strategies/catalog')
+export const getBrokerages        = () => request<BrokerageSpec[]>('/strategies/brokerages')
+export const getBrokerSummary     = (brokerId: string, universe: string) =>
+  request<Record<string, unknown>>(`/strategies/brokerages/${brokerId}/summary?universe=${encodeURIComponent(universe)}`)
+export const listStrategyRuns     = (limit = 20) => request<Record<string, unknown>[]>(`/strategies/runs?limit=${limit}`)
+export const getStrategyRun       = (id: string) => request<Record<string, unknown>>(`/strategies/runs/${id}`)
+
+export async function exportStrategy(body: {
+  strategy_id: string
+  params:      Record<string, unknown>
+  broker_id:   string
+  tickers:     string[]
+  start_date:  string
+  end_date:    string
+  kpis:        BacktestKPIs
+}): Promise<void> {
+  const auth = await authHeader()
+  const res  = await fetch(`${BASE}/strategies/export`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', ...auth },
+    body:    JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? res.statusText)
+  }
+  const { filename, content } = await res.json()
+  const blob = new Blob([content], { type: 'text/plain' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function streamBacktest(
+  strategyId:  string,
+  paramsJson:  string,
+  brokerId:    string,
+  universe:    string,
+  startDate:   string,
+  endDate:     string,
+  capital:     number,
+  portfolioId: string | null,
+  onEvent:     (ev: BacktestStreamEvent) => void,
+  signal?:     AbortSignal,
+): Promise<BacktestResult> {
+  const auth   = await authHeader()
+  const params = new URLSearchParams({
+    strategy_id:  strategyId,
+    params_json:  paramsJson,
+    broker_id:    brokerId,
+    universe,
+    start_date:   startDate,
+    end_date:     endDate,
+    capital:      String(capital),
+  })
+  if (portfolioId) params.set('portfolio_id', portfolioId)
+
+  const res = await fetch(`${BASE}/strategies/run/stream?${params.toString()}`, {
+    headers: { ...auth },
+    signal,
+  })
+  if (!res.ok || !res.body) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? res.statusText)
+  }
+
+  const reader  = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: BacktestResult | null = null
+  let errMsg: string | null = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx: number
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      const line = frame.split('\n').find(l => l.startsWith('data:'))
+      if (!line) continue
+      const json = line.slice(5).trim()
+      if (!json) continue
+      try {
+        const ev = JSON.parse(json) as BacktestStreamEvent
+        onEvent(ev)
+        if (ev.type === 'result') result = ev.data
+        if (ev.type === 'error')  errMsg = ev.message
+      } catch { /* ignore */ }
+    }
+  }
+
+  if (errMsg)  throw new Error(errMsg)
+  if (!result) throw new Error('Backtest stream ended without a result')
+  return result
+}

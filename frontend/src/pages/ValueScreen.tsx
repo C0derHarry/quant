@@ -4,7 +4,7 @@ import { runMagicFormula, runQARP } from '../lib/api'
 import Spinner from '../components/ui/Spinner'
 import DataTable, { Column } from '../components/ui/DataTable'
 import StockBrowser from '../components/ui/StockBrowser'
-import { X, Wand2, Sparkles, AlertTriangle } from 'lucide-react'
+import { X, Wand2, Sparkles } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 function ScoreBar({ rank, total }: { rank: number; total: number }) {
@@ -97,16 +97,6 @@ export default function ValueScreen() {
 
       {/* Right: Selected + results */}
       <div className="flex flex-1 flex-col gap-4 overflow-hidden">
-
-        {/* Banking disclaimer */}
-        <div className="flex items-start gap-2.5 rounded-md border border-[rgba(210,153,34,.3)] bg-[rgba(210,153,34,.06)] px-4 py-3">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" />
-          <p className="text-xs leading-relaxed text-warn/90">
-            <span className="font-semibold">Banking &amp; NBFC stocks are not suitable for these screeners.</span>{' '}
-            Banks maintain their balance sheets differently - EBIT, Net PPE, and Working Capital metrics are not meaningful for them.
-            Results for banking stocks will be misleading. Stick to non-financial sectors.
-          </p>
-        </div>
 
         {/* Selected chips */}
         <div className="rounded-md border border-border bg-bg-surface p-4">

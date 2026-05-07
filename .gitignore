@@ -59,3 +59,7 @@ frontend/.vite/
 # ML model cache
 *.joblib
 api/signal_cache/
+
+# Runtime caches
+api/ai_cache/
+api/news_cache/
