@@ -2,6 +2,8 @@ import { Component, type ReactNode } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute    from './components/ProtectedRoute'
+import DisclaimerGate    from './components/DisclaimerGate'
+import PremiumGate       from './components/PremiumGate'
 import Layout            from './components/layout/Layout'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -40,6 +42,8 @@ import PortfolioTracker  from './pages/PortfolioTracker'
 import TechnicalAnalysis from './pages/TechnicalAnalysis'
 import AIOverview        from './pages/AIOverview'
 import Backtesting       from './pages/Backtesting'
+import ModelsInfo        from './pages/ModelsInfo'
+import Pricing           from './pages/Pricing'
 
 export default function App() {
   return (
@@ -50,22 +54,43 @@ export default function App() {
         <Route path="/login"    element={<Login />} />
         <Route path="/register" element={<Register />} />
 
-        {/* Protected routes — all wrapped in Layout */}
+        {/* Protected routes — all wrapped in DisclaimerGate then Layout */}
         <Route element={<ProtectedRoute />}>
-          <Route element={<Layout />}>
-            <Route path="/"             element={<MarketOverview />} />
-            <Route path="/sector/:name" element={<SectorDetail />} />
-            <Route path="/value"        element={<ValueScreen />} />
-            <Route path="/fundamentals" element={<StockFundamentals />} />
-            <Route path="/volatility"   element={<VolatilityForecast />} />
-            <Route path="/portfolio"    element={<PositionSizing />} />
-            <Route path="/signals"      element={<MLSignals />} />
-            <Route path="/news"         element={<NewsHub />} />
-            <Route path="/earnings"     element={<EarningsSurprise />} />
-            <Route path="/tracker"      element={<PortfolioTracker />} />
-            <Route path="/technical"    element={<TechnicalAnalysis />} />
-            <Route path="/ai-overview"  element={<AIOverview />} />
-            <Route path="/backtesting"  element={<Backtesting />} />
+          <Route element={<DisclaimerGate />}>
+            <Route element={<Layout />}>
+              {/* Free routes */}
+              <Route path="/"             element={<MarketOverview />} />
+              <Route path="/sector/:name" element={<SectorDetail />} />
+              <Route path="/value"        element={<ValueScreen />} />
+              <Route path="/fundamentals" element={<StockFundamentals />} />
+              <Route path="/tracker"      element={<PortfolioTracker />} />
+              <Route path="/models"       element={<ModelsInfo />} />
+              <Route path="/pricing"      element={<Pricing />} />
+
+              {/* Premium routes */}
+              <Route element={<PremiumGate featureKey="volatility" />}>
+                <Route path="/volatility" element={<VolatilityForecast />} />
+              </Route>
+              <Route element={<PremiumGate featureKey="portfolio_optimize" />}>
+                <Route path="/portfolio" element={<PositionSizing />} />
+              </Route>
+              <Route element={<PremiumGate featureKey="ml_signals" />}>
+                <Route path="/signals" element={<MLSignals />} />
+              </Route>
+              <Route path="/news" element={<NewsHub />} />
+              <Route element={<PremiumGate featureKey="earnings" />}>
+                <Route path="/earnings" element={<EarningsSurprise />} />
+              </Route>
+              <Route element={<PremiumGate featureKey="technical_analysis" />}>
+                <Route path="/technical" element={<TechnicalAnalysis />} />
+              </Route>
+              <Route element={<PremiumGate featureKey="ai_overview" />}>
+                <Route path="/ai-overview" element={<AIOverview />} />
+              </Route>
+              <Route element={<PremiumGate featureKey="backtesting" />}>
+                <Route path="/backtesting" element={<Backtesting />} />
+              </Route>
+            </Route>
           </Route>
         </Route>
       </Routes>
