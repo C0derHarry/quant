@@ -656,3 +656,21 @@ export async function streamBacktest(
   if (!result) throw new Error('Backtest stream ended without a result')
   return result
 }
+
+// ── Legal / Disclaimer ────────────────────────────────────────────
+export interface DisclaimerStatus { accepted: boolean; current_version: string }
+
+export const getDisclaimer       = () => request<{ version: string; text: string }>('/legal/disclaimer')
+export const getDisclaimerStatus = () => request<DisclaimerStatus>('/legal/disclaimer/status')
+export const acceptDisclaimer    = () => request<{ ok: boolean }>('/legal/disclaimer/accept', { method: 'POST' })
+
+// ── Subscription & Entitlements ───────────────────────────────────
+export interface SubscriptionInfo {
+  tier: 'free' | 'premium'
+  status: 'active' | 'trialing' | 'past_due' | 'canceled'
+  current_period_end: string | null
+}
+
+export const getMySubscription  = () => request<SubscriptionInfo>('/subscription/me')
+export const getMyEntitlements  = () => request<Record<string, boolean>>('/subscription/entitlements')
+export const getMyTrials        = () => request<Record<string, boolean>>('/subscription/trials')
