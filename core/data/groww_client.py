@@ -35,9 +35,9 @@ def _token_valid(token: str) -> bool:
         return False
 
 
-def _make_client() -> GrowwAPI:
+def _make_client() -> tuple[GrowwAPI, str]:
     """
-    Return an authenticated GrowwAPI instance.
+    Return (GrowwAPI instance, token_string).
 
     Priority:
     1. GROWW_ACCESS_TOKEN env var (if still valid)
@@ -45,7 +45,7 @@ def _make_client() -> GrowwAPI:
     """
     access_token = os.getenv("GROWW_ACCESS_TOKEN", "")
     if access_token and _token_valid(access_token):
-        return GrowwAPI(access_token)
+        return GrowwAPI(access_token), access_token
 
     api_key = os.getenv("GROWW_API", "")
     secret  = os.getenv("GROWW_SECRET", "")
@@ -56,29 +56,28 @@ def _make_client() -> GrowwAPI:
         )
     try:
         new_token = GrowwAPI.get_access_token(api_key=api_key, secret=secret)
-        return GrowwAPI(new_token)
+        return GrowwAPI(new_token), new_token
     except GrowwAPIException as exc:
         raise GrowwError(f"Failed to generate Groww access token: {exc}") from exc
 
 
-_lock   = Lock()
-_client: GrowwAPI | None = None
+_lock:       Lock            = Lock()
+_client:     GrowwAPI | None = None
+_token_str:  str             = ""  # JWT belonging to _client; re-checked on every access
 
 
 def get_groww_client() -> GrowwAPI:
-    """Return the module-level GrowwAPI singleton (lazy-init, thread-safe)."""
-    global _client
+    """Return the module-level GrowwAPI singleton.
+
+    Re-creates the client whenever the stored token is within 5 min of expiry
+    (or already expired), so a daily 6am token rotation is handled automatically.
+    Raises GrowwError if no valid credentials are available.
+    """
+    global _client, _token_str
     with _lock:
-        if _client is None:
-            _client = _make_client()
+        if _client is None or not _token_valid(_token_str):
+            _client, _token_str = _make_client()
         return _client
-
-
-def reset_groww_client() -> None:
-    """Force re-initialization on the next get_groww_client() call."""
-    global _client
-    with _lock:
-        _client = None
 
 
 def ticker_snapshot_from_quote(payload: dict) -> dict:

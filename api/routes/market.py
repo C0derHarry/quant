@@ -1,4 +1,6 @@
+import io
 import time as _time
+import requests
 import pandas as pd
 import yfinance as yf
 import pandas_market_calendars as mcal
@@ -39,6 +41,84 @@ NSE_SECTOR_NAMES = [
     "NIFTY INFRA", "NIFTY FIN SERVICE",
 ]
 
+# ── NSE Archives constituent fetcher ──────────────────────────────────────────
+# NSE's live equity-stockIndices API blocks non-browser clients.
+# archives.nseindia.com serves the same constituent CSVs without auth or JS.
+
+_ARCHIVES_BASE    = "https://archives.nseindia.com/content/indices/"
+_ARCHIVES_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
+
+INDEX_CSV_MAP: dict[str, str] = {
+    "NIFTY 50":            "ind_nifty50list.csv",
+    "NIFTY NEXT 50":       "ind_niftynext50list.csv",
+    "NIFTY 100":           "ind_nifty100list.csv",
+    "NIFTY 200":           "ind_nifty200list.csv",
+    "NIFTY 500":           "ind_nifty500list.csv",
+    "NIFTY MIDCAP 50":     "ind_niftymidcap50list.csv",
+    "NIFTY MIDCAP 100":    "ind_niftymidcap100list.csv",
+    "NIFTY MIDCAP 150":    "ind_niftymidcap150list.csv",
+    "NIFTY SMALLCAP 50":   "ind_niftysmallcap50list.csv",
+    "NIFTY SMALLCAP 100":  "ind_niftysmallcap100list.csv",
+    "NIFTY SMALLCAP 250":  "ind_niftysmallcap250list.csv",
+    "NIFTY BANK":          "ind_niftybanklist.csv",
+    "NIFTY IT":            "ind_niftyitlist.csv",
+    "NIFTY PHARMA":        "ind_niftypharmalist.csv",
+    "NIFTY AUTO":          "ind_niftyautolist.csv",
+    "NIFTY FMCG":          "ind_niftyfmcglist.csv",
+    "NIFTY METAL":         "ind_niftymetallist.csv",
+    "NIFTY ENERGY":        "ind_niftyenergylist.csv",
+    "NIFTY INFRA":         "ind_niftyinfralist.csv",
+    "NIFTY FIN SERVICE":   "ind_niftyfinancelist.csv",
+}
+
+_CONSTITUENT_CACHE: dict[str, tuple[list[dict], float]] = {}
+_CONSTITUENT_TTL = 86400  # 24h — index compositions change quarterly
+
+
+def _fetch_constituents(index_name: str) -> list[dict]:
+    """Return [{symbol, name}] for index_name; cached 24 h."""
+    now = _time.time()
+    if index_name in _CONSTITUENT_CACHE:
+        rows, ts = _CONSTITUENT_CACHE[index_name]
+        if now - ts < _CONSTITUENT_TTL:
+            return rows
+    csv_file = INDEX_CSV_MAP.get(index_name)
+    if not csv_file:
+        raise ValueError(f"No constituent CSV for index '{index_name}'")
+    url = _ARCHIVES_BASE + csv_file
+    r = requests.get(url, timeout=15, headers=_ARCHIVES_HEADERS)
+    r.raise_for_status()
+    df = pd.read_csv(io.StringIO(r.text))
+    rows = [
+        {"symbol": str(row["Symbol"]).strip(), "name": str(row["Company Name"]).title()}
+        for _, row in df.iterrows()
+        if str(row.get("Series", "EQ")).strip() == "EQ"
+    ]
+    _CONSTITUENT_CACHE[index_name] = (rows, now)
+    return rows
+
+
+def _yf_stock_row(symbol: str, name: str) -> dict | None:
+    """Full stock row via yfinance fast_info (price, change, volume, 52-wk range)."""
+    try:
+        fi      = yf.Ticker(f"{symbol}.NS").fast_info
+        price   = float(fi["lastPrice"] or 0)
+        prev    = float(fi["previousClose"] or 0)
+        change  = round(price - prev, 2)
+        pct     = round(change / prev * 100, 3) if prev else 0.0
+        return {
+            "symbol":     symbol,
+            "name":       name,
+            "price":      price,
+            "change":     change,
+            "pct_change": pct,
+            "volume":     int(fi["lastVolume"] or 0),
+            "year_high":  float(fi["yearHigh"] or 0),
+            "year_low":   float(fi["yearLow"] or 0),
+        }
+    except Exception:
+        return None
+
 
 def _ticker_snapshot(ticker: str) -> dict:
     info = yf.Ticker(ticker).fast_info
@@ -52,6 +132,49 @@ def _ticker_snapshot(ticker: str) -> dict:
     }
 
 
+# Maps display name → nsetools get_index_quote() argument
+_NSE_INDEX_NAMES: dict[str, str] = {
+    "NIFTY 50":          "nifty 50",
+    "BANK NIFTY":        "nifty bank",
+    "NIFTY BANK":        "nifty bank",
+    "FIN NIFTY":         "nifty fin service",
+    "NIFTY IT":          "nifty it",
+    "NIFTY PHARMA":      "nifty pharma",
+    "NIFTY AUTO":        "nifty auto",
+    "NIFTY FMCG":        "nifty fmcg",
+    "NIFTY METAL":       "nifty metal",
+    "NIFTY ENERGY":      "nifty energy",
+    "NIFTY INFRA":       "nifty infrastructure",
+    "NIFTY FIN SERVICE": "nifty fin service",
+}
+
+
+def _parse_num(v) -> float:
+    if isinstance(v, (int, float)):
+        return float(v)
+    return float(str(v).replace(",", "") or 0)
+
+
+def _nse_snapshot(name: str) -> dict:
+    """nsetools index snapshot. Raises ValueError if mapping or data missing."""
+    nse_name = _NSE_INDEX_NAMES.get(name)
+    if not nse_name:
+        raise ValueError(f"No nsetools mapping for '{name}'")
+    q = nse.get_index_quote(nse_name)
+    if not q:
+        raise ValueError(f"nsetools returned empty for '{nse_name}'")
+    price  = _parse_num(q.get("last", 0))
+    prev   = _parse_num(q.get("previousClose", 0))
+    change = _parse_num(q.get("variation", 0))
+    pct    = _parse_num(q.get("percentChange", 0))
+    return {
+        "price":      round(price, 2),
+        "prev_close": round(prev, 2),
+        "change":     round(change, 2),
+        "pct_change": round(pct, 3),
+    }
+
+
 def _groww_snapshot(name: str) -> dict:
     """Real-time snapshot from Groww Quote API. Raises GrowwError on failure."""
     exchange, segment, symbol = GROWW_SNAPSHOTS[name]
@@ -60,13 +183,16 @@ def _groww_snapshot(name: str) -> dict:
 
 
 def _snapshot(name: str, yf_ticker: str) -> dict:
-    """Groww-first snapshot with automatic yfinance fallback."""
+    """3-tier snapshot: Groww → nsetools → yfinance."""
     if name in GROWW_SNAPSHOTS:
         try:
             return _groww_snapshot(name)
-        except GrowwError:
+        except Exception:
             pass
-    return _ticker_snapshot(yf_ticker)
+    try:
+        return _nse_snapshot(name)
+    except Exception:
+        return _ticker_snapshot(yf_ticker)
 
 
 @router.get("/indices")
@@ -94,25 +220,16 @@ def get_sectors():
 @router.get("/sector/{sector_name}/stocks")
 def get_sector_stocks(sector_name: str):
     try:
-        raw = nse.get_stock_quote_in_index(sector_name)
+        constituents = _fetch_constituents(sector_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
     rows = []
-    for s in raw:
-        try:
-            rows.append({
-                "symbol":     s.get("symbol", ""),
-                "name":       s.get("meta", {}).get("companyName", "").title(),
-                "price":      float(s.get("lastPrice", 0)),
-                "change":     float(s.get("change", 0)),
-                "pct_change": float(s.get("pChange", 0)),
-                "volume":     s.get("totalTradedVolume", 0),
-                "year_high":  float(s.get("yearHigh", 0)),
-                "year_low":   float(s.get("yearLow", 0)),
-            })
-        except Exception:
-            continue
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        futures = {ex.submit(_yf_stock_row, c["symbol"], c["name"]): c for c in constituents}
+        for fut in futures:
+            r = fut.result()
+            if r is not None:
+                rows.append(r)
     return sorted(rows, key=lambda x: x["pct_change"], reverse=True)
 
 
@@ -129,20 +246,20 @@ _prev_close_ts:    dict[str, float]            = {}   # sector → last refresh 
 
 
 def _refresh_prev_close(sector_name: str) -> dict[str, float]:
-    raw = nse.get_stock_quote_in_index(sector_name)
-    pc: dict[str, float] = {}
-    for s in raw:
-        sym = s.get("symbol", "")
-        if not sym:
-            continue
+    constituents = _fetch_constituents(sector_name)
+
+    def _get_prev(c: dict) -> tuple[str, float]:
         try:
-            last = float(s.get("lastPrice", 0))
-            pct  = float(s.get("pChange", 0))
-            denom = 1 + pct / 100
-            if last and denom:
-                pc[sym] = last / denom
+            fi = yf.Ticker(f"{c['symbol']}.NS").fast_info
+            return c["symbol"], float(fi["previousClose"] or 0)
         except Exception:
-            continue
+            return c["symbol"], 0.0
+
+    pc: dict[str, float] = {}
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        for sym, prev in ex.map(_get_prev, constituents):
+            if prev:
+                pc[sym] = prev
     return pc
 
 
@@ -192,22 +309,29 @@ def _groww_quotes_bulk(symbols: list[str], max_workers: int = 16) -> dict[str, d
     return out
 
 
-def _nsetools_quotes_fallback(sector_name: str) -> dict[str, dict]:
-    raw = nse.get_stock_quote_in_index(sector_name)
+def _yf_quotes_fallback(sector_name: str) -> dict[str, dict]:
+    """yfinance fallback for sector quotes when Groww is unavailable."""
+    try:
+        constituents = _fetch_constituents(sector_name)
+    except Exception:
+        return {}
+
+    def _one(c: dict) -> tuple[str, dict | None]:
+        row = _yf_stock_row(c["symbol"], c["name"])
+        if row is None:
+            return c["symbol"], None
+        return c["symbol"], {
+            "price":      row["price"],
+            "change":     row["change"],
+            "pct_change": row["pct_change"],
+            "volume":     row["volume"],
+        }
+
     quotes: dict[str, dict] = {}
-    for s in raw:
-        sym = s.get("symbol", "")
-        if not sym:
-            continue
-        try:
-            quotes[sym] = {
-                "price":      float(s.get("lastPrice", 0)),
-                "change":     float(s.get("change", 0)),
-                "pct_change": float(s.get("pChange", 0)),
-                "volume":     int(s.get("totalTradedVolume", 0) or 0),
-            }
-        except Exception:
-            continue
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        for sym, q in ex.map(_one, constituents):
+            if q is not None:
+                quotes[sym] = q
     return quotes
 
 
@@ -227,7 +351,7 @@ def get_sector_quotes(sector_name: str):
     try:
         return _groww_quotes_bulk(list(prev_close.keys()))
     except Exception:
-        return _nsetools_quotes_fallback(sector_name)
+        return _yf_quotes_fallback(sector_name)
 
 
 _ENRICH_INDICES = [
@@ -241,14 +365,10 @@ _ENRICH_INDICES = [
 
 
 def _fetch_name_map() -> dict[str, str]:
-    """Fetch symbol→companyName from multiple indices in parallel."""
+    """Fetch symbol→companyName from multiple indices in parallel via archives CSVs."""
     def _one(idx: str) -> dict[str, str]:
         try:
-            rows = nse.get_stock_quote_in_index(idx)
-            return {
-                r["symbol"]: r.get("meta", {}).get("companyName", "").title()
-                for r in rows if r.get("symbol")
-            }
+            return {c["symbol"]: c["name"] for c in _fetch_constituents(idx)}
         except Exception:
             return {}
 
@@ -291,17 +411,9 @@ def get_sector_names():
 @router.get("/sector/{sector_name}/symbols")
 def get_sector_symbols(sector_name: str):
     try:
-        raw = nse.get_stock_quote_in_index(sector_name)
+        return _fetch_constituents(sector_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    return [
-        {
-            "symbol": s.get("symbol", ""),
-            "name":   s.get("meta", {}).get("companyName", s.get("symbol", "")).title(),
-        }
-        for s in raw
-        if s.get("symbol")
-    ]
 
 
 class SymbolList(BaseModel):
@@ -390,22 +502,14 @@ def asset_compare(period: str = "1y"):
 @router.get("/index/{index_name}/stocks")
 def get_index_stocks(index_name: str):
     try:
-        raw = nse.get_stock_quote_in_index(index_name)
+        constituents = _fetch_constituents(index_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     rows = []
-    for s in raw:
-        try:
-            rows.append({
-                "symbol":     s.get("symbol", ""),
-                "name":       s.get("meta", {}).get("companyName", "").title(),
-                "price":      float(s.get("lastPrice", 0)),
-                "change":     float(s.get("change", 0)),
-                "pct_change": float(s.get("pChange", 0)),
-                "volume":     s.get("totalTradedVolume", 0),
-                "year_high":  float(s.get("yearHigh", 0)),
-                "year_low":   float(s.get("yearLow", 0)),
-            })
-        except Exception:
-            continue
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        futures = {ex.submit(_yf_stock_row, c["symbol"], c["name"]): c for c in constituents}
+        for fut in futures:
+            r = fut.result()
+            if r is not None:
+                rows.append(r)
     return sorted(rows, key=lambda x: x["pct_change"], reverse=True)
