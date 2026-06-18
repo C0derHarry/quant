@@ -657,6 +657,40 @@ export async function streamBacktest(
   return result
 }
 
+// ── Scorecard ─────────────────────────────────────────────────────
+export interface ScorecardModelResult {
+  key:        string
+  label:      string
+  raw_value:  number | null
+  display:    string
+  sub_score:  number | null
+  status:     'ok' | 'partial' | 'missing'
+  tier:       'free' | 'premium'
+  note:       string | null
+}
+
+export interface ScorecardPillar {
+  key:      string
+  label:    string
+  score:    number | null
+  grade:    'A' | 'B' | 'C' | 'D' | 'F' | 'N/A'
+  verdict:  string
+  coverage: number
+  models:   ScorecardModelResult[]
+}
+
+export interface ScorecardResult {
+  ticker:       string
+  as_of:        string
+  is_financial: boolean
+  data_warning: string | null
+  overall:      { score: number | null; grade: string }
+  pillars:      ScorecardPillar[]
+}
+
+export const getScorecard = (ticker: string) =>
+  request<ScorecardResult>(`/scorecard/${encodeURIComponent(ticker)}`)
+
 // ── Legal / Disclaimer ────────────────────────────────────────────
 export interface DisclaimerStatus { accepted: boolean; current_version: string }
 

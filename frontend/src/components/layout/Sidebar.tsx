@@ -2,7 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   BarChart2, TrendingUp, Search, Activity, Sliders,
   ChevronRight, Home, Brain, Newspaper, Award, LogOut, Sparkles, FlaskConical,
-  BookOpen, Tag, Lock,
+  BookOpen, Tag, Lock, Star,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useAuth } from '../../contexts/AuthContext'
@@ -10,21 +10,22 @@ import { useEntitlements } from '../../hooks/useEntitlements'
 
 const NAV: { label: string; path: string; icon: React.ElementType; section: string; featureKey?: string }[] = [
   { label: 'Overview',           path: '/',            icon: Home,         section: 'MARKET' },
+  { label: 'Stock Scorecard',    path: '/stock',        icon: Star,         section: 'RESEARCH' },
   { label: 'Value Screen',       path: '/value',        icon: Search,       section: 'RESEARCH' },
   { label: 'Deep Dive',          path: '/fundamentals', icon: BarChart2,    section: 'RESEARCH' },
   { label: 'Earnings',           path: '/earnings',     icon: Award,        section: 'RESEARCH',   featureKey: 'earnings' },
-  { label: 'Volatility',         path: '/volatility',   icon: Activity,     section: 'ANALYTICS',  featureKey: 'volatility' },
-  { label: 'ML Signals',         path: '/signals',      icon: Brain,        section: 'ANALYTICS',  featureKey: 'ml_signals' },
-  { label: 'Technical Analysis', path: '/technical',    icon: BarChart2,    section: 'ANALYTICS',  featureKey: 'technical_analysis' },
   { label: 'AI Overview',        path: '/ai-overview',  icon: Sparkles,     section: 'ANALYTICS',  featureKey: 'ai_overview' },
   { label: 'Portfolio',          path: '/portfolio',    icon: Sliders,      section: 'ANALYTICS',  featureKey: 'portfolio_optimize' },
   { label: 'Backtesting',        path: '/backtesting',  icon: FlaskConical, section: 'ANALYTICS',  featureKey: 'backtesting' },
+  { label: 'Volatility',         path: '/volatility',   icon: Activity,     section: 'TOOLS',      featureKey: 'volatility' },
+  { label: 'ML Signals',         path: '/signals',      icon: Brain,        section: 'TOOLS',      featureKey: 'ml_signals' },
+  { label: 'Technical Analysis', path: '/technical',    icon: BarChart2,    section: 'TOOLS',      featureKey: 'technical_analysis' },
   { label: 'News Hub',           path: '/news',         icon: Newspaper,    section: 'NEWS' },
   { label: 'Models',             path: '/models',       icon: BookOpen,     section: 'LEARN' },
   { label: 'Pricing',            path: '/pricing',      icon: Tag,          section: 'LEARN' },
 ]
 
-const SECTIONS = ['MARKET', 'RESEARCH', 'ANALYTICS', 'NEWS', 'LEARN']
+const SECTIONS = ['MARKET', 'RESEARCH', 'ANALYTICS', 'TOOLS', 'NEWS', 'LEARN']
 
 export default function Sidebar() {
   const { pathname } = useLocation()

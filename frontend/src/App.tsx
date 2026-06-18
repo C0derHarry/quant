@@ -44,6 +44,7 @@ import AIOverview        from './pages/AIOverview'
 import Backtesting       from './pages/Backtesting'
 import ModelsInfo        from './pages/ModelsInfo'
 import Pricing           from './pages/Pricing'
+import StockAnalysis     from './pages/StockAnalysis'
 
 export default function App() {
   return (
@@ -63,6 +64,7 @@ export default function App() {
               <Route path="/sector/:name" element={<SectorDetail />} />
               <Route path="/value"        element={<ValueScreen />} />
               <Route path="/fundamentals" element={<StockFundamentals />} />
+              <Route path="/stock"        element={<StockAnalysis />} />
               <Route path="/tracker"      element={<PortfolioTracker />} />
               <Route path="/models"       element={<ModelsInfo />} />
               <Route path="/pricing"      element={<Pricing />} />
